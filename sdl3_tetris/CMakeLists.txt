@@ -4,6 +4,11 @@ project(MySDL3App LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if (DEFINED ENV{VCPKG_ROOT})
+    set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+    message(STATUS "Found ENV var")
+endif()
+
 # First try to find SDL3 installed on system (via find_package)
 find_package(SDL3 CONFIG QUIET)
 
