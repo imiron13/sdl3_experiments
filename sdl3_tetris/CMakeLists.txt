@@ -1,15 +1,23 @@
-cmake_minimum_required(VERSION 3.10)
-project(sdl3_tetris)
+cmake_minimum_required(VERSION 3.24)
+project(MySDL3App LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(SOURCES
-    sdl3_tetris.cpp
-)
+# First try to find SDL3 installed on system (via find_package)
+find_package(SDL3 CONFIG QUIET)
 
-find_package(SDL3 REQUIRED)
-include_directories(${SDL3_INCLUDE_DIRS})
-link_directories(${SDL3_LIBRARY_DIRS})
-add_executable(sdl3_tetris ${SOURCES})
-target_link_libraries(sdl3_tetris ${SDL3_LIBRARIES})
+if (NOT SDL3_FOUND)
+    message(STATUS "SDL3 not found on system, fetching and building SDL3...")
+
+    include(FetchContent)
+    FetchContent_Declare(
+        SDL3
+        GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+        GIT_TAG release-3.2.20
+    )
+    FetchContent_MakeAvailable(SDL3)
+endif()
+
+add_executable(sdl3_tetris sdl3_tetris.cpp)
+target_link_libraries(sdl3_tetris PRIVATE SDL3::SDL3)
