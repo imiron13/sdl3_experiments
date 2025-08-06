@@ -1,0 +1,10 @@
+{
+    "files.associations": {
+        "utility": "cpp",
+        "xutility": "cpp",
+        "iostream": "cpp"
+    },
+    "cmake.sourceDirectory": "${workspaceFolder}/sdl3_tetris",
+    "cmake.buildDirectory": "${workspaceFolder}/sdl3_tetris/build",
+    "cmake.useCMakePresets": "always"
+}
