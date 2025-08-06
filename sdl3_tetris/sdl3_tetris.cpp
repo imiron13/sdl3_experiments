@@ -4,6 +4,7 @@
 #include <iostream>
 #include <random>
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
 
 using namespace std;
 
@@ -662,29 +663,37 @@ void ConsoleRenderer::_cursorToTopLeft()
 class SdlRenderer
 {
 public:
-    SdlRenderer(const GameState& gs, int xsize, int ysize);
+    SdlRenderer(const GameState& gs);
     ~SdlRenderer();
     void render();
+    void zoomIn();
+    void zoomOut();
 
 private:
-    int _initSdl(int windowWidth, int windowHeight);
-    int _closeSdl();
+    bool _initSdl();
+    bool _createWindow();
+    bool _deleteWindow();
+    bool _closeSdl();
     
     static const int _xborder = 8;
     static const int _yborder = 8;
     const GameState& _gs;
+    int _displayWidth;
+    int _displayHeight;
     int _xsize;
     int _ysize;
+    int _maxSize;
     SDL_Window* _window;
     SDL_Surface* _screenSurface;
 };
 
-SdlRenderer::SdlRenderer(const GameState& gs, int xsize=16, int ysize=16)
+SdlRenderer::SdlRenderer(const GameState& gs)
     : _gs(gs)
-    , _xsize(xsize)
-    , _ysize(xsize)
+    , _xsize(16)
+    , _ysize(16)
 {
-    _initSdl(_xborder * 2 + _xsize * _gs.field().width(), _yborder * 2 + _ysize * _gs.field().height());
+    _initSdl();
+    _createWindow();
 }
 
 SdlRenderer::~SdlRenderer()
@@ -692,7 +701,7 @@ SdlRenderer::~SdlRenderer()
     _closeSdl();
 }
 
-int SdlRenderer::_initSdl(int windowWidth, int windowHeight)
+bool SdlRenderer::_initSdl()
 {
     bool success = true;
 
@@ -703,29 +712,76 @@ int SdlRenderer::_initSdl(int windowWidth, int windowHeight)
     }
     else
     {
-        _window = SDL_CreateWindow("SDL3 Tetris", windowWidth, windowHeight, 0);
-        if (!_window)
-        {
-            SDL_Log( "Window could not be created! SDL error: %s\n", SDL_GetError() );
-            success = false;
-        }
-        else
-        {
-            _screenSurface = SDL_GetWindowSurface(_window);
-        }
+        const SDL_DisplayMode* displayMode = SDL_GetCurrentDisplayMode(1);
+        _displayWidth = displayMode->w;
+        _displayHeight = displayMode->h;
+        int windowPanelWidth = 20;
+        int windowPanelHeight = 50;
+        int taskBarHeight = _displayHeight / 20;
+        _maxSize = min((_displayWidth - _xborder * 2 - windowPanelWidth) / _gs.field().width(), (_displayHeight - _yborder * 2 - taskBarHeight - windowPanelHeight) / _gs.field().height());
+        _xsize = _maxSize;
+        _ysize = _maxSize;
     }
 
     return success;
 }
 
-int SdlRenderer::_closeSdl()
+bool SdlRenderer::_closeSdl()
+{
+    _deleteWindow();
+    SDL_Quit();
+    return true;
+}
+
+bool SdlRenderer::_createWindow()
+{
+    bool success = true;
+    _window = SDL_CreateWindow("SDL3 Tetris", _xborder * 2 + _xsize * _gs.field().width(), _yborder * 2 + _ysize * _gs.field().height(), 0);
+    if (!_window)
+    {
+        SDL_Log( "Window could not be created! SDL error: %s\n", SDL_GetError() );
+        success = false;
+    }
+    else
+    {
+        _screenSurface = SDL_GetWindowSurface(_window);
+    }
+    return success;    
+}
+
+bool SdlRenderer::_deleteWindow()
 {
     SDL_DestroyWindow(_window);
     _window = nullptr;
     _screenSurface = nullptr;
-
-    SDL_Quit();
     return true;
+}
+
+void SdlRenderer::zoomIn()
+{
+    if (_xsize * 2 <= _maxSize && _ysize * 2 <= _maxSize)
+    {
+        _xsize *= 2;
+        _ysize *= 2;
+    }
+    else
+    {
+        _xsize = _maxSize;
+        _ysize = _maxSize;
+    }
+    _deleteWindow();
+    _createWindow();
+}
+
+void SdlRenderer::zoomOut()
+{
+    if (_xsize > 1 && _ysize > 1)
+    {
+        _xsize /= 2;
+        _ysize /= 2;
+    }
+    _deleteWindow();
+    _createWindow();
 }
 
 void SdlRenderer::render()
@@ -761,6 +817,8 @@ enum class UserInput
     ACCELERATE,
     ROTATE,
     PAUSE,
+    ZOOM_IN,
+    ZOOM_OUT,
     QUIT,
 };
 
@@ -795,13 +853,25 @@ UserInput getUserInput()
             {
                 return UserInput::ROTATE;
             }
+            else if(e.key.key == SDLK_EQUALS)
+            {
+                return UserInput::ZOOM_IN;
+            }
+            else if(e.key.key == SDLK_MINUS)
+            {
+                return UserInput::ZOOM_OUT;
+            }
+            else if(e.key.key == SDLK_P)
+            {
+                return UserInput::PAUSE;
+            }
         }
     }
 
     return UserInput::NONE;
 }
 
-int main()
+int main(int argc, char* argv[])
 {
     Game game(10,20);
     //ConsoleRenderer consoleRenderer(game.gameState());
@@ -852,6 +922,14 @@ int main()
             else if (userInput == UserInput::ROTATE)
             {
                 game.handleRotate();
+            }
+            else if (userInput == UserInput::ZOOM_IN)
+            {
+                sdlRenderer.zoomIn();
+            }
+            else if (userInput == UserInput::ZOOM_OUT)
+            {
+                sdlRenderer.zoomOut();
             }
             needRedraw = true;
         }

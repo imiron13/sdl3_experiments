@@ -24,5 +24,19 @@ if (NOT SDL3_FOUND)
     FetchContent_MakeAvailable(SDL3)
 endif()
 
-add_executable(sdl3_tetris sdl3_tetris.cpp)
+
+set(SOURCES
+    sdl3_tetris.cpp
+)
+
+if(WIN32)
+    add_executable(sdl3_tetris WIN32
+        ${SOURCES}
+    )
+else()
+    add_executable(sdl3_tetris
+        ${SOURCES}
+    )
+endif()
+
 target_link_libraries(sdl3_tetris PRIVATE SDL3::SDL3)
