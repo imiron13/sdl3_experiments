@@ -788,17 +788,21 @@ void SdlRenderer::render()
 {
     SDL_Rect fieldRect(0, 0, _xborder * 2 + _gs.field().width() * _xsize, _yborder * 2 + _gs.field().height() * _ysize);
     SDL_FillSurfaceRect(_screenSurface, &fieldRect, SDL_MapSurfaceRGB(_screenSurface, 0xFF, 0xFF, 0xFF));
+    fieldRect = SDL_Rect(_xborder, _yborder, _gs.field().width() * _xsize, _gs.field().height() * _ysize);
+    SDL_FillSurfaceRect(_screenSurface, &fieldRect, SDL_MapSurfaceRGB(_screenSurface, 0, 0, 0));
+
     for (int y = 0; y < _gs.field().height(); ++y) 
     {
         for (int x = 0; x < _gs.field().width(); ++x) 
         {
-            SDL_Rect rect(_xborder + x * _xsize, _yborder + y * _ysize, _xsize, _ysize);
             if (_gs.isFieldPixelOccupied(x, y))
             {
+                SDL_Rect rect(_xborder + x * _xsize + 1, _yborder + y * _ysize + 1, _xsize - 2, _ysize - 2);
                 SDL_FillSurfaceRect(_screenSurface, &rect, SDL_MapSurfaceRGB(_screenSurface, 0xFF, 0xFF, 0xFF ));
             }
             else
             {
+                SDL_Rect rect(_xborder + x * _xsize, _yborder + y * _ysize, _xsize, _ysize);
                 SDL_FillSurfaceRect(_screenSurface, &rect, SDL_MapSurfaceRGB(_screenSurface, 0x00, 0x00, 0x00 ));
             }
         }
