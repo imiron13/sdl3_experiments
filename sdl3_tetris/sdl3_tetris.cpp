@@ -3,6 +3,7 @@
 #include <memory>
 #include <iostream>
 #include <random>
+#include <algorithm>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
@@ -267,17 +268,17 @@ public:
     }
 
     bool get(int x, int y) const {
-        return _fieldMap->at(ofs(x, y));
+        return _fieldMap.at(ofs(x, y));
     }
     void set(int x, int y, bool val=true) {
-        _fieldMap->at(ofs(x, y)) = val;
+        _fieldMap.at(ofs(x, y)) = val;
     }
     void clear(int x, int y) {
         set(x, y, false);
     }
 
     void clear() {
-        fill(_fieldMap->begin(), _fieldMap->end(), false);
+        fill(_fieldMap.begin(), _fieldMap.end(), false);
     }
 
     bool isLineFull(int y) const;
@@ -290,7 +291,7 @@ private:
 
     int _width;
     int _height;
-    unique_ptr<vector<bool>> _fieldMap;
+    vector<bool> _fieldMap;
 };
 
 bool Field::isLineFull(int y) const
@@ -308,8 +309,8 @@ bool Field::isLineFull(int y) const
 Field::Field(int width, int height)
     : _width(width)
     , _height(height)
+    , _fieldMap(width * height)
 {
-    _fieldMap = make_unique<vector<bool>>(width * height);
     clear();
 }
 
@@ -703,16 +704,20 @@ SdlRenderer::~SdlRenderer()
 
 bool SdlRenderer::_initSdl()
 {
-    bool success = true;
-
     if (SDL_Init(SDL_INIT_VIDEO) == false)
     {
         SDL_Log("SDL could not initialize! SDL error: %s\n", SDL_GetError());
-        success = false;
+        return false;
     }
     else
     {
-        const SDL_DisplayMode* displayMode = SDL_GetCurrentDisplayMode(1);
+        SDL_DisplayID displayID = SDL_GetPrimaryDisplay();
+        const SDL_DisplayMode* displayMode = SDL_GetCurrentDisplayMode(displayID);
+        if (!displayMode)
+        {
+            SDL_Log("SDL_GetCurrentDisplayMode failed: %s\n", SDL_GetError());
+            return false;
+        }
         _displayWidth = displayMode->w;
         _displayHeight = displayMode->h;
         int windowPanelWidth = 20;
@@ -723,7 +728,7 @@ bool SdlRenderer::_initSdl()
         _ysize = _maxSize;
     }
 
-    return success;
+    return true;
 }
 
 bool SdlRenderer::_closeSdl()
