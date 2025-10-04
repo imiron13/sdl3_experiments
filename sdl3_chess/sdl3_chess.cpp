@@ -22,16 +22,30 @@ enum class PieceColor
 };
 
 using Piece = pair<PieceType, PieceColor>;
+using Square = pair<int, int>; // (x, y)
 
 const int BOARD_SIZE = 8;
 
 class GameState
 {
 public:
+    static inline const Square INVALID_SQUARE = {-1, -1};
+
     void initializeBoard();
-    const Piece& pieceAt(int x, int y) const { return _board[x][y]; }
+    const Piece& pieceAt(Square sq) const { return _board[sq.first][sq.second]; }
+
+    void selectSquare(Square sq) { _selectedSquare = sq; }
+    void movePiece(Square from, Square to);
+    Square getSelectedSquare() const { return _selectedSquare; }
+    void clearSelection() { _selectedSquare = INVALID_SQUARE; }
+    vector<Square> getPossibleMoves() const;
+    PieceColor currentTurn() const { return _turn; }
+    void switchTurn() { _turn = (_turn == PieceColor::WHITE) ? PieceColor::BLACK : PieceColor::WHITE; }
+
 private:
     array<array<Piece, BOARD_SIZE>, BOARD_SIZE> _board;
+    Square _selectedSquare = INVALID_SQUARE;
+    PieceColor _turn = PieceColor::WHITE;
 };
 
 void GameState::initializeBoard()
@@ -62,6 +76,20 @@ void GameState::initializeBoard()
     _board[7][7] = {PieceType::ROOK, PieceColor::BLACK};
 }
 
+vector<Square> GameState::getPossibleMoves() const
+{
+    return {};
+}
+
+void GameState::movePiece(Square from, Square to)
+{
+    if (from != INVALID_SQUARE && to != INVALID_SQUARE)
+    {
+        _board[to.first][to.second] = _board[from.first][from.second];
+        _board[from.first][from.second] = {PieceType::NONE, PieceColor::NONE};
+    }
+}
+
 class Game
 {
     GameState _state;
@@ -74,87 +102,6 @@ public:
 void Game::start()
 {
     _state.initializeBoard();
-}
-
-//------------------------------------------------------------------------------
-// User interface: render to console
-//------------------------------------------------------------------------------
-class ConsoleRenderer
-{
-public:
-    ConsoleRenderer(const GameState& gs);
-    void render();
-
-private:
-    void _cursorToTopLeft();
-    const GameState& _gs;
-};
-
-ConsoleRenderer::ConsoleRenderer(const GameState& gs)
-    : _gs(gs)
-{
-}
-
-void ConsoleRenderer::render()
-{
-    _cursorToTopLeft();
-    int width = BOARD_SIZE * 2 + 2;
-    int height = BOARD_SIZE + 2;
-    // Unicode box-drawing characters
-    const char* topLeft = "┌";
-    const char* topRight = "┐";
-    const char* bottomLeft = "└";
-    const char* bottomRight = "┘";
-    const char* horizontal = "─";
-    const char* vertical = "│";
-
-    // Draw top border
-    std::cout << topLeft;
-    for (int i = 0; i < width - 2; ++i) {
-        std::cout << horizontal;
-    }
-    std::cout << topRight << std::endl;
-
-    // Draw middle part
-    for (int i = 0; i < height - 2; ++i) {
-        std::cout << vertical;
-        for (int j = 0; j < width - 2; ++j) {
-            int y = height - 3 - i;
-            int x = j / 2;
-            if (j % 2 == 0)
-            {
-                Piece piece = _gs.pieceAt(x, y);
-                char symbol = ' ';
-                switch (piece.first)
-                {
-                    case PieceType::KING:   symbol = (piece.second == PieceColor::WHITE) ? 'K' : 'k'; break;
-                    case PieceType::QUEEN:  symbol = (piece.second == PieceColor::WHITE) ? 'Q' : 'q'; break;
-                    case PieceType::ROOK:   symbol = (piece.second == PieceColor::WHITE) ? 'R' : 'r'; break;
-                    case PieceType::BISHOP: symbol = (piece.second == PieceColor::WHITE) ? 'B' : 'b'; break;
-                    case PieceType::KNIGHT: symbol = (piece.second == PieceColor::WHITE) ? 'N' : 'n'; break;
-                    case PieceType::PAWN:   symbol = (piece.second == PieceColor::WHITE) ? 'P' : 'p'; break;
-                    case PieceType::NONE:   symbol = ' '; break;
-                    default:               symbol = '?'; break;
-                }
-                std::cout << symbol;
-            }
-            else std::cout << ' ';
-
-        }
-        std::cout << vertical << std::endl;
-    }
-
-    // Draw bottom border
-    std::cout << bottomLeft;
-    for (int i = 0; i < width - 2; ++i) {
-        std::cout << horizontal;
-    }
-    std::cout << bottomRight << std::endl;
-}
-
-void ConsoleRenderer::_cursorToTopLeft()
-{
-    std::cout << "\033[H";
 }
 
 //------------------------------------------------------------------------------
@@ -250,6 +197,7 @@ public:
     void render();
     void zoomIn();
     void zoomOut();
+    Square getSquareAtScreenPos(int x, int y);
 
 private:
     bool _initSdl();
@@ -341,6 +289,17 @@ int SdlRenderer::_pieceTypeToIndex(Piece piece)
         }
     }
     return -1;
+}
+
+Square SdlRenderer::getSquareAtScreenPos(int x, int y)
+{
+    int boardX = (x - _xborder) / _xsize;
+    int boardY = BOARD_SIZE - 1 - (y - _yborder) / _ysize;
+    if (boardX >= 0 && boardX < BOARD_SIZE && boardY >= 0 && boardY < BOARD_SIZE)
+    {
+        return Square{boardX, boardY};
+    }
+    return GameState::INVALID_SQUARE;
 }
 
 bool SdlRenderer::_initSdl()
@@ -448,17 +407,19 @@ void SdlRenderer::render()
             {
                 SDL_SetRenderDrawColor(_renderer, 0xE0, 0xE0, 0xE0, 0xFF);
             }
+
+            if (_gs.getSelectedSquare() == Square{x, y})
+            {
+                SDL_SetRenderDrawColor(_renderer, 0xFF, 0xA0, 0x00, 0xFF);
+            }
+            SDL_SetRenderDrawBlendMode(_renderer, SDL_BLENDMODE_NONE);
             SDL_RenderFillRect(_renderer, &rect);
 
-            Piece piece = _gs.pieceAt(x, y);
+            Piece piece = _gs.pieceAt(Square{x, y});
             int spriteIndex = _pieceTypeToIndex(piece);
             if (spriteIndex >= 0 && spriteIndex < static_cast<int>(_pieceSprites.size()))
             {
                 _pieceSprites[spriteIndex]->draw(_xborder + x * _xsize, _yborder + (BOARD_SIZE - 1 - y) * _ysize, _xsize, _ysize);
-            }
-            else
-            {
-
             }
         }
     }
@@ -471,10 +432,6 @@ void SdlRenderer::render()
 enum class UserInput
 {
     NONE,
-    MOVE_LEFT,
-    MOVE_RIGHT,
-    ACCELERATE,
-    ROTATE,
     PAUSE,
     ZOOM_IN,
     ZOOM_OUT,
@@ -496,22 +453,6 @@ UserInput getUserInput()
             {
                 return UserInput::QUIT;
             }            
-            else if(e.key.key == SDLK_DOWN)
-            {
-                return UserInput::ACCELERATE;
-            }
-            else if(e.key.key == SDLK_LEFT)
-            {
-                return UserInput::MOVE_LEFT;
-            }
-            else if(e.key.key == SDLK_RIGHT)
-            {
-                return UserInput::MOVE_RIGHT;
-            }
-            else if(e.key.key == SDLK_SPACE || e.key.key == SDLK_UP)
-            {
-                return UserInput::ROTATE;
-            }
             else if(e.key.key == SDLK_EQUALS)
             {
                 return UserInput::ZOOM_IN;
@@ -525,6 +466,14 @@ UserInput getUserInput()
                 return UserInput::PAUSE;
             }
         }
+        else if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+        {
+            int x = e.button.x;
+            int y = e.button.y;
+            int boardX = (x - 8) / 16;
+            int boardY = 7 - (y - 8) / 16;
+            std::cout << "Mouse click at (" << x << ", " << y << "), board square (" << boardX << ", " << boardY << ")\n";
+        }
     }
 
     return UserInput::NONE;
@@ -533,7 +482,6 @@ UserInput getUserInput()
 int main(int argc, char* argv[])
 {
     Game game;
-    //ConsoleRenderer consoleRenderer(game.gameState());
     SdlRenderer sdlRenderer(game.gameState());
     game.start();
     int subTickDelayMs = 10;
@@ -547,47 +495,74 @@ int main(int argc, char* argv[])
     {
         if (needRedraw)
         {
-            //consoleRenderer.render();
             sdlRenderer.render();
 
             needRedraw = false;
         }
         SDL_Delay(subTickDelayMs);
 
-        UserInput userInput;
-        while ((userInput = getUserInput()) != UserInput::NONE)
+        SDL_Event e;
+        while (SDL_PollEvent(&e) == true)
         {
-            if (userInput == UserInput::QUIT)
+            if(e.type == SDL_EVENT_QUIT)
             {
                 quit = true;
             }
-            else if (userInput == UserInput::PAUSE)
+            else if(e.type == SDL_EVENT_KEY_DOWN)
             {
-                paused = !paused;
+                if(e.key.key == SDLK_ESCAPE)
+                {
+                    quit = true;
+                }            
+                else if(e.key.key == SDLK_EQUALS)
+                {
+                    sdlRenderer.zoomIn();
+                }
+                else if(e.key.key == SDLK_MINUS)
+                {
+                    sdlRenderer.zoomOut();
+                }
+                else if(e.key.key == SDLK_P)
+                {
+                    paused = !paused;
+                }
             }
-            else if (userInput == UserInput::MOVE_LEFT)
+            else if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
             {
-                //game.handleMoveLeft();
-            }
-            else if (userInput == UserInput::MOVE_RIGHT)
-            {
-                //game.handleMoveRight();
-            }
-            else if (userInput == UserInput::ACCELERATE)
-            {
-                //game.handleAccelerate();
-            }
-            else if (userInput == UserInput::ROTATE)
-            {
-                //game.handleRotate();
-            }
-            else if (userInput == UserInput::ZOOM_IN)
-            {
-                sdlRenderer.zoomIn();
-            }
-            else if (userInput == UserInput::ZOOM_OUT)
-            {
-                sdlRenderer.zoomOut();
+                int x = e.button.x;
+                int y = e.button.y;
+                if (e.button.button == SDL_BUTTON_LEFT)
+                {
+                    auto sq = sdlRenderer.getSquareAtScreenPos(x, y);
+                    if (sq != GameState::INVALID_SQUARE)
+                    {
+                        Piece piece = game.gameState().pieceAt(sq);
+                        if (game.gameState().currentTurn() == piece.second && piece.second != PieceColor::NONE)
+                        {
+                            game.gameState().selectSquare(sq);
+                        }
+                        else
+                        {
+                            auto selected = game.gameState().getSelectedSquare();
+                            if (selected != GameState::INVALID_SQUARE)
+                            {
+                                // Check if the move is valid (not implemented yet)
+                                bool validMove = true;
+                                if (validMove)
+                                {
+                                    game.gameState().movePiece(selected, sq);
+                                    game.gameState().clearSelection();
+                                    game.gameState().switchTurn();
+                                }
+                                game.gameState().clearSelection();
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    game.gameState().clearSelection();
+                }
             }
             needRedraw = true;
         }
