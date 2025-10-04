@@ -14,7 +14,8 @@ cmake --build out
 ```
 
 ## Chess
-TBD
+<img width="1384" alt="image" src="https://github.com/user-attachments/assets/249dc94d-e49b-453f-902e-b9684673e6c5" />
+
 
 ### Build
 ```
