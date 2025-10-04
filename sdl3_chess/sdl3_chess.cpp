@@ -3,6 +3,7 @@
 #include <memory>
 #include <iostream>
 #include <random>
+#include <algorithm>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <SDL3_image/SDL_image.h>
@@ -10,6 +11,7 @@
 using namespace std;
 
 const string ASSERTS_DIR =  "sdl3_chess/assets/";
+//const string ASSERTS_DIR =  "../../../assets/";
 
 enum class PieceType
 {
@@ -38,14 +40,16 @@ public:
     void movePiece(Square from, Square to);
     Square getSelectedSquare() const { return _selectedSquare; }
     void clearSelection() { _selectedSquare = INVALID_SQUARE; }
-    vector<Square> getPossibleMoves() const;
     PieceColor currentTurn() const { return _turn; }
     void switchTurn() { _turn = (_turn == PieceColor::WHITE) ? PieceColor::BLACK : PieceColor::WHITE; }
+    vector<Square>& possibleMoves() { return _possibleMoves; }
+    const vector<Square>& possibleMoves() const { return _possibleMoves; }
 
 private:
     array<array<Piece, BOARD_SIZE>, BOARD_SIZE> _board;
     Square _selectedSquare = INVALID_SQUARE;
     PieceColor _turn = PieceColor::WHITE;
+    vector<Square> _possibleMoves;
 };
 
 void GameState::initializeBoard()
@@ -76,11 +80,6 @@ void GameState::initializeBoard()
     _board[7][7] = {PieceType::ROOK, PieceColor::BLACK};
 }
 
-vector<Square> GameState::getPossibleMoves() const
-{
-    return {};
-}
-
 void GameState::movePiece(Square from, Square to)
 {
     if (from != INVALID_SQUARE && to != INVALID_SQUARE)
@@ -96,12 +95,178 @@ class Game
 public:
     GameState& gameState() { return _state; }
     void start();
+    vector<Square> getPossibleMoves() const;
+    bool isValidMove(Square to) const;
+    bool select(Square sq);
+    bool move(Square to);
     bool doTick() { return false; } // return true if game over
 };
 
 void Game::start()
 {
     _state.initializeBoard();
+}
+
+vector<Square> Game::getPossibleMoves() const
+{
+    vector<Square> possibleMoves;
+    if (_state.getSelectedSquare() != GameState::INVALID_SQUARE)
+    {
+        Piece piece = _state.pieceAt(_state.getSelectedSquare());
+        if (piece.first != PieceType::NONE && piece.second == _state.currentTurn())
+        {
+            if (piece.first == PieceType::PAWN)
+            {
+                int direction = (piece.second == PieceColor::WHITE) ? 1 : -1;
+                Square front = {_state.getSelectedSquare().first, _state.getSelectedSquare().second + direction};
+                if (front.second >= 0 && front.second < BOARD_SIZE && _state.pieceAt(front).first == PieceType::NONE)
+                {
+                    possibleMoves.push_back(front);
+                }
+                Square doubleFront = {_state.getSelectedSquare().first, _state.getSelectedSquare().second + 2 * direction};
+                if ((piece.second == PieceColor::WHITE && _state.getSelectedSquare().second == 1) ||
+                    (piece.second == PieceColor::BLACK && _state.getSelectedSquare().second == 6))
+                {
+                    if (doubleFront.second >= 0 && doubleFront.second < BOARD_SIZE && _state.pieceAt(doubleFront).first == PieceType::NONE && _state.pieceAt(front).first == PieceType::NONE)
+                    {
+                        possibleMoves.push_back(doubleFront);
+                    }
+                }
+
+                // Capture moves
+                Square captureLeft = {_state.getSelectedSquare().first - 1, _state.getSelectedSquare().second + direction};
+                Square captureRight = {_state.getSelectedSquare().first + 1, _state.getSelectedSquare().second + direction};
+                if (captureLeft.first >= 0 && captureLeft.first < BOARD_SIZE && captureLeft.second >= 0 && captureLeft.second < BOARD_SIZE)
+                {
+                    Piece target = _state.pieceAt(captureLeft);
+                    if (target.first != PieceType::NONE && target.second != piece.second)
+                    {
+                        possibleMoves.push_back(captureLeft);
+                    }
+                }
+                if (captureRight.first >= 0 && captureRight.first < BOARD_SIZE && captureRight.second >= 0 && captureRight.second < BOARD_SIZE)
+                {
+                    Piece target = _state.pieceAt(captureRight);
+                    if (target.first != PieceType::NONE && target.second != piece.second)
+                    {
+                        possibleMoves.push_back(captureRight);
+                    }
+                }
+            }
+            else if (piece.first == PieceType::KNIGHT)
+            {
+                vector<Square> knightMoves = {
+                    {1, 2}, {2, 1}, {2, -1}, {1, -2},
+                    {-1, -2}, {-2, -1}, {-2, 1}, {-1, 2}
+                };
+                for (const auto& move : knightMoves)
+                {
+                    Square target = {_state.getSelectedSquare().first + move.first, _state.getSelectedSquare().second + move.second};
+                    if (target.first >= 0 && target.first < BOARD_SIZE && target.second >= 0 && target.second < BOARD_SIZE)
+                    {
+                        Piece targetPiece = _state.pieceAt(target);
+                        if (targetPiece.first == PieceType::NONE || targetPiece.second != piece.second)
+                        {
+                            possibleMoves.push_back(target);
+                        }
+                    }
+                }
+            }
+            else if (piece.first == PieceType::KING)
+            {
+                vector<Square> kingMoves = {
+                    {1, 1}, {1, 0}, {1, -1},
+                    {0, -1}, {-1, -1}, {-1, 0},
+                    {-1, 1}, {0, 1}
+                };
+                for (const auto& move : kingMoves)
+                {
+                    Square target = {_state.getSelectedSquare().first + move.first, _state.getSelectedSquare().second + move.second};
+                    if (target.first >= 0 && target.first < BOARD_SIZE && target.second >= 0 && target.second < BOARD_SIZE)
+                    {
+                        Piece targetPiece = _state.pieceAt(target);
+                        if (targetPiece.first == PieceType::NONE || targetPiece.second != piece.second)
+                        {
+                            possibleMoves.push_back(target);
+                        }
+                    }
+                }
+            }
+            else if (piece.first == PieceType::ROOK || piece.first == PieceType::BISHOP || piece.first == PieceType::QUEEN)
+            {
+                vector<Square> directions;
+                if (piece.first == PieceType::ROOK || piece.first == PieceType::QUEEN)
+                {
+                    directions.insert(directions.end(), {{1, 0}, {-1, 0}, {0, 1}, {0, -1}});
+                }
+                if (piece.first == PieceType::BISHOP || piece.first == PieceType::QUEEN)
+                {
+                    directions.insert(directions.end(), {{1, 1}, {1, -1}, {-1, 1}, {-1, -1}});
+                }
+
+                for (const auto& dir : directions)
+                {
+                    Square target = _state.getSelectedSquare();
+                    while (true)
+                    {
+                        target.first += dir.first;
+                        target.second += dir.second;
+                        if (target.first < 0 || target.first >= BOARD_SIZE || target.second < 0 || target.second >= BOARD_SIZE)
+                        {
+                            break;
+                        }
+                        Piece targetPiece = _state.pieceAt(target);
+                        if (targetPiece.first == PieceType::NONE)
+                        {
+                            possibleMoves.push_back(target);
+                        }
+                        else
+                        {
+                            if (targetPiece.second != piece.second)
+                            {
+                                possibleMoves.push_back(target);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return possibleMoves;
+}
+
+bool Game::select(Square sq)
+{
+    Piece piece = _state.pieceAt(sq);
+    if (piece.first != PieceType::NONE && piece.second == _state.currentTurn())
+    {
+        _state.selectSquare(sq);
+        _state.possibleMoves() = getPossibleMoves();
+        return true;
+    }
+    return false;
+}
+
+bool Game::isValidMove(Square to) const
+{
+    return _state.getSelectedSquare() != GameState::INVALID_SQUARE &&
+           ranges::find(_state.possibleMoves(), to) != _state.possibleMoves().end();
+}
+
+bool Game::move(Square to)
+{
+    bool validMove = _state.getSelectedSquare() != GameState::INVALID_SQUARE &&
+                     ranges::find(_state.possibleMoves(), to) != _state.possibleMoves().end();
+    if (validMove)
+    {
+        _state.movePiece(_state.getSelectedSquare(), to);
+        _state.clearSelection();
+        _state.switchTurn();
+    }
+    _state.clearSelection();
+    _state.possibleMoves().clear();
+    return validMove;
 }
 
 //------------------------------------------------------------------------------
@@ -390,6 +555,7 @@ void SdlRenderer::zoomOut()
 
 void SdlRenderer::render()
 {
+    auto possibleMoves = _gs.possibleMoves();
     for (int y = 0; y < BOARD_SIZE; ++y) 
     {
         for (int x = 0; x < BOARD_SIZE; ++x) 
@@ -415,6 +581,12 @@ void SdlRenderer::render()
             SDL_SetRenderDrawBlendMode(_renderer, SDL_BLENDMODE_NONE);
             SDL_RenderFillRect(_renderer, &rect);
 
+            if (ranges::find(possibleMoves, Square{x, y}) != possibleMoves.end())
+            {
+                SDL_SetRenderDrawColor(_renderer, 0x00, 0xFF, 0x00, 0x80);
+                SDL_SetRenderDrawBlendMode(_renderer, SDL_BLENDMODE_BLEND);
+                SDL_RenderFillRect(_renderer, &rect);
+            }            
             Piece piece = _gs.pieceAt(Square{x, y});
             int spriteIndex = _pieceTypeToIndex(piece);
             if (spriteIndex >= 0 && spriteIndex < static_cast<int>(_pieceSprites.size()))
@@ -539,22 +711,14 @@ int main(int argc, char* argv[])
                         Piece piece = game.gameState().pieceAt(sq);
                         if (game.gameState().currentTurn() == piece.second && piece.second != PieceColor::NONE)
                         {
-                            game.gameState().selectSquare(sq);
+                            game.select(sq);
                         }
                         else
                         {
                             auto selected = game.gameState().getSelectedSquare();
                             if (selected != GameState::INVALID_SQUARE)
                             {
-                                // Check if the move is valid (not implemented yet)
-                                bool validMove = true;
-                                if (validMove)
-                                {
-                                    game.gameState().movePiece(selected, sq);
-                                    game.gameState().clearSelection();
-                                    game.gameState().switchTurn();
-                                }
-                                game.gameState().clearSelection();
+                                bool moved = game.move(sq);
                             }
                         }
                     }
@@ -562,6 +726,19 @@ int main(int argc, char* argv[])
                 else
                 {
                     game.gameState().clearSelection();
+                }
+            }
+            else if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT)
+            {
+                int x = e.button.x;
+                int y = e.button.y;
+                auto sq = sdlRenderer.getSquareAtScreenPos(x, y);
+                if (sq != GameState::INVALID_SQUARE && game.gameState().getSelectedSquare() != GameState::INVALID_SQUARE)
+                {
+                    if (game.isValidMove(sq))
+                    {
+                        bool moved = game.move(sq);
+                    }
                 }
             }
             needRedraw = true;
