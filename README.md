@@ -14,7 +14,8 @@ cmake --build out
 ```
 
 ## Chess
-<img width="1384" alt="image" src="https://github.com/user-attachments/assets/249dc94d-e49b-453f-902e-b9684673e6c5" />
+<img width="1400" height="1476" alt="image" src="https://github.com/user-attachments/assets/f139a3b6-ec0b-4031-af16-b556047ca250" />
+
 
 
 ### Build
