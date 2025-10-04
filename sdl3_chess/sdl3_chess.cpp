@@ -9,7 +9,7 @@
 
 using namespace std;
 
-const string ASSERTS_DIR =  "../../../assets/";
+const string ASSERTS_DIR =  "sdl3_chess/assets/";
 
 enum class PieceType
 {
@@ -256,7 +256,7 @@ private:
     bool _createWindow();
     bool _deleteWindow();
     bool _closeSdl();
-    
+    bool _loadResources();
     static const int _xborder = 8;
     static const int _yborder = 8;
     const GameState& _gs;
@@ -286,6 +286,17 @@ SdlRenderer::SdlRenderer(const GameState& gs)
     } else {
         std::cerr << "getcwd() error" << std::endl;
     }
+    _loadResources();
+}
+
+SdlRenderer::~SdlRenderer()
+{
+    _closeSdl();
+}
+
+bool SdlRenderer::_loadResources()
+{
+    _pieceSprites.clear();
     _pieceSprites.push_back(make_unique<Sprite>(_renderer, ASSERTS_DIR + "white-king.png"));
     _pieceSprites.push_back(make_unique<Sprite>(_renderer, ASSERTS_DIR + "white-queen.png"));
     _pieceSprites.push_back(make_unique<Sprite>(_renderer, ASSERTS_DIR + "white-rook.png"));
@@ -298,11 +309,7 @@ SdlRenderer::SdlRenderer(const GameState& gs)
     _pieceSprites.push_back(make_unique<Sprite>(_renderer, ASSERTS_DIR + "black-bishop.png"));
     _pieceSprites.push_back(make_unique<Sprite>(_renderer, ASSERTS_DIR + "black-knight.png"));
     _pieceSprites.push_back(make_unique<Sprite>(_renderer, ASSERTS_DIR + "black-pawn.png"));
-}
-
-SdlRenderer::~SdlRenderer()
-{
-    _closeSdl();
+    return true;
 }
 
 int SdlRenderer::_pieceTypeToIndex(Piece piece)
@@ -407,6 +414,7 @@ void SdlRenderer::zoomIn()
     }
     _deleteWindow();
     _createWindow();
+    _loadResources();
 }
 
 void SdlRenderer::zoomOut()
@@ -418,6 +426,7 @@ void SdlRenderer::zoomOut()
     }
     _deleteWindow();
     _createWindow();
+    _loadResources();
 }
 
 void SdlRenderer::render()
