@@ -605,6 +605,8 @@ private:
 ConsoleRenderer::ConsoleRenderer(const GameState& gs)
     : _gs(gs)
 {
+    // Clear screen and hide cursor
+    std::cout << "\033[2J\033[?25l";
 }
 
 void ConsoleRenderer::render()

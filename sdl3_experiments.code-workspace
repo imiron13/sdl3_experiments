@@ -1,0 +1,31 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "sdl3_chess"
+		},
+		{
+			"path": "sdl3_tetris"
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"utility": "cpp",
+			"xutility": "cpp",
+			"iostream": "cpp",
+			"stdexcept": "cpp",
+			"any": "cpp",
+			"array": "cpp",
+			"charconv": "cpp",
+			"compare": "cpp",
+			"functional": "cpp",
+			"ratio": "cpp",
+			"tuple": "cpp",
+			"type_traits": "cpp",
+			"variant": "cpp",
+			"ostream": "cpp"
+		}
+	}
+}

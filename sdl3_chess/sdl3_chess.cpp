@@ -5,8 +5,11 @@
 #include <random>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
+#include <SDL3_image/SDL_image.h>
 
 using namespace std;
+
+const string ASSERTS_DIR =  "../../../assets/";
 
 enum class PieceType
 {
@@ -130,6 +133,8 @@ void ConsoleRenderer::render()
                     case PieceType::BISHOP: symbol = (piece.second == PieceColor::WHITE) ? 'B' : 'b'; break;
                     case PieceType::KNIGHT: symbol = (piece.second == PieceColor::WHITE) ? 'N' : 'n'; break;
                     case PieceType::PAWN:   symbol = (piece.second == PieceColor::WHITE) ? 'P' : 'p'; break;
+                    case PieceType::NONE:   symbol = ' '; break;
+                    default:               symbol = '?'; break;
                 }
                 std::cout << symbol;
             }
@@ -155,6 +160,88 @@ void ConsoleRenderer::_cursorToTopLeft()
 //------------------------------------------------------------------------------
 // User interface: render in graphical mode
 //------------------------------------------------------------------------------
+class Sprite {
+public:
+    Sprite(SDL_Renderer* renderer, const std::string& file) 
+        : renderer(renderer), texture(nullptr), width(0), height(0) 
+    {
+        loadFromFile(file);
+    }
+
+    ~Sprite() {
+        if (texture) {
+            SDL_DestroyTexture(texture);
+        }
+    }
+
+    // Disallow copy
+    Sprite(const Sprite&) = delete;
+    Sprite& operator=(const Sprite&) = delete;
+
+    // Allow move
+    Sprite(Sprite&& other) noexcept 
+        : renderer(other.renderer), texture(other.texture),
+          width(other.width), height(other.height)
+    {
+        other.texture = nullptr;
+    }
+
+    Sprite& operator=(Sprite&& other) noexcept {
+        if (this != &other) {
+            if (texture) SDL_DestroyTexture(texture);
+            renderer = other.renderer;
+            texture = other.texture;
+            width = other.width;
+            height = other.height;
+            other.texture = nullptr;
+        }
+        return *this;
+    }
+
+    void draw(int x, int y, int w = -1, int h = -1) {
+        SDL_FRect dst;
+        dst.x = static_cast<float>(x);
+        dst.y = static_cast<float>(y);
+        dst.w = (w > 0) ? static_cast<float>(w) : static_cast<float>(width);
+        dst.h = (h > 0) ? static_cast<float>(h) : static_cast<float>(height);
+
+        SDL_RenderTexture(renderer, texture, nullptr, &dst);
+    }
+
+    int getWidth() const { return width; }
+    int getHeight() const { return height; }
+
+private:
+    SDL_Renderer* renderer;
+    SDL_Texture* texture;
+    int width, height;
+
+    void loadFromFile(const std::string& file) {
+        SDL_Surface* surface = IMG_Load(file.c_str());
+        if (!surface) {
+            throw std::runtime_error(std::string("Failed to load image: ") + SDL_GetError());
+        }
+
+        // Ensure the surface has alpha (e.g. for transparent PNGs)
+        SDL_Surface* converted = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32);
+        
+        SDL_DestroySurface(surface);
+        if (!converted) {
+            throw std::runtime_error(std::string("Failed to convert surface: ") + SDL_GetError());
+        }
+
+        texture = SDL_CreateTextureFromSurface(renderer, converted);
+        width = converted->w;
+        height = converted->h;
+
+        SDL_DestroySurface(converted);
+
+        if (!texture) {
+            throw std::runtime_error(std::string("Failed to create texture: ") + SDL_GetError());
+        }
+    }
+};
+
 class SdlRenderer
 {
 public:
@@ -180,6 +267,9 @@ private:
     int _maxSize;
     SDL_Window* _window;
     SDL_Surface* _screenSurface;
+    SDL_Renderer* _renderer;
+    int _pieceTypeToIndex(Piece piece);
+    vector<unique_ptr<Sprite>> _pieceSprites;
 };
 
 SdlRenderer::SdlRenderer(const GameState& gs)
@@ -189,11 +279,61 @@ SdlRenderer::SdlRenderer(const GameState& gs)
 {
     _initSdl();
     _createWindow();
+    char cwd[PATH_MAX];
+    setvbuf(stdout, NULL, _IONBF, 0);
+    if (getcwd(cwd, sizeof(cwd)) != nullptr) {
+        std::cout << "Current working directory: " << cwd << std::endl;
+    } else {
+        std::cerr << "getcwd() error" << std::endl;
+    }
+    _pieceSprites.push_back(make_unique<Sprite>(_renderer, ASSERTS_DIR + "white-king.png"));
+    _pieceSprites.push_back(make_unique<Sprite>(_renderer, ASSERTS_DIR + "white-queen.png"));
+    _pieceSprites.push_back(make_unique<Sprite>(_renderer, ASSERTS_DIR + "white-rook.png"));
+    _pieceSprites.push_back(make_unique<Sprite>(_renderer, ASSERTS_DIR + "white-bishop.png"));
+    _pieceSprites.push_back(make_unique<Sprite>(_renderer, ASSERTS_DIR + "white-knight.png"));
+    _pieceSprites.push_back(make_unique<Sprite>(_renderer, ASSERTS_DIR + "white-pawn.png"));
+    _pieceSprites.push_back(make_unique<Sprite>(_renderer, ASSERTS_DIR + "black-king.png"));
+    _pieceSprites.push_back(make_unique<Sprite>(_renderer, ASSERTS_DIR + "black-queen.png"));
+    _pieceSprites.push_back(make_unique<Sprite>(_renderer, ASSERTS_DIR + "black-rook.png"));
+    _pieceSprites.push_back(make_unique<Sprite>(_renderer, ASSERTS_DIR + "black-bishop.png"));
+    _pieceSprites.push_back(make_unique<Sprite>(_renderer, ASSERTS_DIR + "black-knight.png"));
+    _pieceSprites.push_back(make_unique<Sprite>(_renderer, ASSERTS_DIR + "black-pawn.png"));
 }
 
 SdlRenderer::~SdlRenderer()
 {
     _closeSdl();
+}
+
+int SdlRenderer::_pieceTypeToIndex(Piece piece)
+{
+    if (piece.second == PieceColor::WHITE)
+    {
+        switch (piece.first)
+        {
+            case PieceType::KING:   return 0;
+            case PieceType::QUEEN:  return 1;
+            case PieceType::ROOK:   return 2;
+            case PieceType::BISHOP: return 3;
+            case PieceType::KNIGHT: return 4;
+            case PieceType::PAWN:   return 5;
+            default:                return -1;
+        }
+    }
+    else if (piece.second == PieceColor::BLACK)
+    {
+        switch (piece.first)
+        {
+            case PieceType::KING:   return 6;
+            case PieceType::QUEEN:  return 7;
+            case PieceType::ROOK:   return 8;
+            case PieceType::BISHOP: return 9;
+            case PieceType::KNIGHT: return 10;
+            case PieceType::PAWN:   return 11;
+            default:                return -1;
+        }
+    }
+    return -1;
 }
 
 bool SdlRenderer::_initSdl()
@@ -231,7 +371,7 @@ bool SdlRenderer::_closeSdl()
 bool SdlRenderer::_createWindow()
 {
     bool success = true;
-    _window = SDL_CreateWindow("SDL3 Chess", _xborder * 2 + _xsize * BOARD_SIZE, _yborder * 2 + _ysize * BOARD_SIZE, 0);
+    SDL_CreateWindowAndRenderer("SDL3 Chess", _xborder * 2 + _xsize * BOARD_SIZE, _yborder * 2 + _ysize * BOARD_SIZE, 0, &_window, &_renderer);
     if (!_window)
     {
         SDL_Log( "Window could not be created! SDL error: %s\n", SDL_GetError() );
@@ -246,6 +386,7 @@ bool SdlRenderer::_createWindow()
 
 bool SdlRenderer::_deleteWindow()
 {
+    SDL_DestroyRenderer(_renderer);
     SDL_DestroyWindow(_window);
     _window = nullptr;
     _screenSurface = nullptr;
@@ -281,30 +422,38 @@ void SdlRenderer::zoomOut()
 
 void SdlRenderer::render()
 {
-    SDL_Rect fieldRect(0, 0, _xborder * 2 + BOARD_SIZE * _xsize, _yborder * 2 + BOARD_SIZE * _ysize);
-    SDL_FillSurfaceRect(_screenSurface, &fieldRect, SDL_MapSurfaceRGB(_screenSurface, 0xFF, 0xFF, 0xFF));
-    fieldRect = SDL_Rect(_xborder, _yborder, BOARD_SIZE * _xsize, BOARD_SIZE * _ysize);
-    SDL_FillSurfaceRect(_screenSurface, &fieldRect, SDL_MapSurfaceRGB(_screenSurface, 0, 0, 0));
-
     for (int y = 0; y < BOARD_SIZE; ++y) 
     {
         for (int x = 0; x < BOARD_SIZE; ++x) 
         {
-            #if 0
-            if (_gs.isFieldPixelOccupied(x, y))
+            SDL_FRect rect;
+            rect.x = static_cast<float>(_xborder + x * _xsize);
+            rect.y = static_cast<float>(_yborder + (BOARD_SIZE - 1 - y) * _ysize);
+            rect.w = static_cast<float>(_xsize);
+            rect.h = static_cast<float>(_ysize);
+            if ((x + y) % 2 == 0)
             {
-                SDL_Rect rect(_xborder + x * _xsize + 1, _yborder + y * _ysize + 1, _xsize - 2, _ysize - 2);
-                SDL_FillSurfaceRect(_screenSurface, &rect, SDL_MapSurfaceRGB(_screenSurface, 0xFF, 0xFF, 0xFF ));
+                SDL_SetRenderDrawColor(_renderer, 0x0, 0x40, 0x60, 0xFF);
             }
             else
             {
-                SDL_Rect rect(_xborder + x * _xsize, _yborder + y * _ysize, _xsize, _ysize);
-                SDL_FillSurfaceRect(_screenSurface, &rect, SDL_MapSurfaceRGB(_screenSurface, 0x00, 0x00, 0x00 ));
+                SDL_SetRenderDrawColor(_renderer, 0xE0, 0xE0, 0xE0, 0xFF);
             }
-            #endif
+            SDL_RenderFillRect(_renderer, &rect);
+
+            Piece piece = _gs.pieceAt(x, y);
+            int spriteIndex = _pieceTypeToIndex(piece);
+            if (spriteIndex >= 0 && spriteIndex < static_cast<int>(_pieceSprites.size()))
+            {
+                _pieceSprites[spriteIndex]->draw(_xborder + x * _xsize, _yborder + (BOARD_SIZE - 1 - y) * _ysize, _xsize, _ysize);
+            }
+            else
+            {
+
+            }
         }
     }
-    SDL_UpdateWindowSurface(_window);
+    SDL_RenderPresent(_renderer);
 }
 
 //------------------------------------------------------------------------------
@@ -375,7 +524,7 @@ UserInput getUserInput()
 int main(int argc, char* argv[])
 {
     Game game;
-    ConsoleRenderer consoleRenderer(game.gameState());
+    //ConsoleRenderer consoleRenderer(game.gameState());
     SdlRenderer sdlRenderer(game.gameState());
     game.start();
     int subTickDelayMs = 10;
@@ -389,7 +538,7 @@ int main(int argc, char* argv[])
     {
         if (needRedraw)
         {
-            consoleRenderer.render();
+            //consoleRenderer.render();
             sdlRenderer.render();
 
             needRedraw = false;
