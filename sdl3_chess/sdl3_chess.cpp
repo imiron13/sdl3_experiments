@@ -98,6 +98,7 @@ public:
     vector<Square> getPossibleMoves() const;
     bool isValidMove(Square to) const;
     bool select(Square sq);
+    void unselect() { _state.clearSelection(); _state.possibleMoves().clear(); }
     bool move(Square to);
     bool doTick() { return false; } // return true if game over
 };
@@ -191,6 +192,54 @@ vector<Square> Game::getPossibleMoves() const
                         }
                     }
                 }
+
+                // castling
+                // Simple castling logic: allow castling if king and rook are in initial positions and squares between are empty
+                // No check/checkmate validation, no castling rights tracking, no move history
+
+                int y = (_state.currentTurn() == PieceColor::WHITE) ? 0 : 7;
+                Square kingStart = {4, y};
+                if (_state.getSelectedSquare() == kingStart)
+                {
+                    // King-side castling
+                    Square rookKingSide = {7, y};
+                    Piece rookPiece = _state.pieceAt(rookKingSide);
+                    if (rookPiece.first == PieceType::ROOK && rookPiece.second == piece.second)
+                    {
+                        bool empty = true;
+                        for (int x = 5; x < 7; ++x)
+                        {
+                            if (_state.pieceAt({x, y}).first != PieceType::NONE)
+                            {
+                                empty = false;
+                                break;
+                            }
+                        }
+                        if (empty)
+                        {
+                            possibleMoves.push_back({6, y});
+                        }
+                    }
+                    // Queen-side castling
+                    Square rookQueenSide = {0, y};
+                    rookPiece = _state.pieceAt(rookQueenSide);
+                    if (rookPiece.first == PieceType::ROOK && rookPiece.second == piece.second)
+                    {
+                        bool empty = true;
+                        for (int x = 1; x < 4; ++x)
+                        {
+                            if (_state.pieceAt({x, y}).first != PieceType::NONE)
+                            {
+                                empty = false;
+                                break;
+                            }
+                        }
+                        if (empty)
+                        {
+                            possibleMoves.push_back({2, y});
+                        }
+                    }
+                }
             }
             else if (piece.first == PieceType::ROOK || piece.first == PieceType::BISHOP || piece.first == PieceType::QUEEN)
             {
@@ -260,6 +309,22 @@ bool Game::move(Square to)
                      ranges::find(_state.possibleMoves(), to) != _state.possibleMoves().end();
     if (validMove)
     {
+        bool isCastling = to.second == _state.getSelectedSquare().second &&
+                         abs(to.first - _state.getSelectedSquare().first) == 2 &&
+                         _state.pieceAt(_state.getSelectedSquare()).first == PieceType::KING;
+        if (isCastling)
+        {
+            // Move the rook as well
+            int y = _state.getSelectedSquare().second;
+            if (to.first == 6) // King-side castling
+            {
+                _state.movePiece({7, y}, {5, y});
+            }
+            else if (to.first == 2) // Queen-side castling
+            {
+                _state.movePiece({0, y}, {3, y});
+            }
+        }
         _state.movePiece(_state.getSelectedSquare(), to);
         _state.clearSelection();
         _state.switchTurn();
@@ -725,7 +790,7 @@ int main(int argc, char* argv[])
                 }
                 else
                 {
-                    game.gameState().clearSelection();
+                    game.unselect();
                 }
             }
             else if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT)
