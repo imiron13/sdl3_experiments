@@ -7,11 +7,14 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <SDL3_image/SDL_image.h>
+#include <sys/wait.h>
 
 using namespace std;
 
 const string ASSERTS_DIR =  "sdl3_chess/assets/";
+const string STOCKFISH_PATH =  "sdl3_chess/stockfish/stockfish";
 //const string ASSERTS_DIR =  "../../../assets/";
+//const string STOCKFISH_PATH =  "../../../stockfish/stockfish";
 
 enum class PieceType
 {
@@ -28,12 +31,16 @@ using Square = pair<int, int>; // (x, y)
 
 const int BOARD_SIZE = 8;
 
+//------------------------------------------------------------------------------
+// Game State
+//------------------------------------------------------------------------------
 class GameState
 {
 public:
     static inline const Square INVALID_SQUARE = {-1, -1};
 
     void initializeBoard();
+    Piece& pieceAt(Square sq) { return _board[sq.first][sq.second]; }
     const Piece& pieceAt(Square sq) const { return _board[sq.first][sq.second]; }
 
     void selectSquare(Square sq) { _selectedSquare = sq; }
@@ -44,6 +51,7 @@ public:
     void switchTurn() { _turn = (_turn == PieceColor::WHITE) ? PieceColor::BLACK : PieceColor::WHITE; }
     vector<Square>& possibleMoves() { return _possibleMoves; }
     const vector<Square>& possibleMoves() const { return _possibleMoves; }
+    string generateFen();
 
 private:
     array<array<Piece, BOARD_SIZE>, BOARD_SIZE> _board;
@@ -51,6 +59,55 @@ private:
     PieceColor _turn = PieceColor::WHITE;
     vector<Square> _possibleMoves;
 };
+
+string GameState::generateFen()
+{
+    string fen;
+    for (int y = BOARD_SIZE - 1; y >= 0; --y) {
+        int empty = 0;
+        for (int x = 0; x < BOARD_SIZE; ++x) {
+            const Piece& piece = _board[x][y];
+            if (piece.first == PieceType::NONE) {
+                ++empty;
+            } else {
+                if (empty > 0) {
+                    fen += to_string(empty);
+                    empty = 0;
+                }
+                char c = ' ';
+                switch (piece.first) {
+                    case PieceType::KING:   c = 'k'; break;
+                    case PieceType::QUEEN:  c = 'q'; break;
+                    case PieceType::ROOK:   c = 'r'; break;
+                    case PieceType::BISHOP: c = 'b'; break;
+                    case PieceType::KNIGHT: c = 'n'; break;
+                    case PieceType::PAWN:   c = 'p'; break;
+                    default: break;
+                }
+                if (piece.second == PieceColor::WHITE)
+                    c = toupper(c);
+                fen += c;
+            }
+        }
+        if (empty > 0) fen += to_string(empty);
+        if (y > 0) fen += '/';
+    }
+
+    // Turn
+    fen += ' ';
+    fen += (_turn == PieceColor::WHITE) ? 'w' : 'b';
+
+    // Castling rights (not tracked, so always "-")
+    fen += " -";
+
+    // En passant (not tracked, so always "-")
+    fen += " -";
+
+    // Halfmove clock and fullmove number (not tracked, so always "0 1")
+    fen += " 0 1";
+
+    return fen;
+}
 
 void GameState::initializeBoard()
 {
@@ -89,6 +146,9 @@ void GameState::movePiece(Square from, Square to)
     }
 }
 
+//------------------------------------------------------------------------------
+// Game Logic
+//------------------------------------------------------------------------------
 class Game
 {
     GameState _state;
@@ -100,7 +160,7 @@ public:
     bool select(Square sq);
     void unselect() { _state.clearSelection(); _state.possibleMoves().clear(); }
     bool move(Square to);
-    bool doTick() { return false; } // return true if game over
+    bool isGameOver() const { return false; } // Placeholder
 };
 
 void Game::start()
@@ -326,12 +386,147 @@ bool Game::move(Square to)
             }
         }
         _state.movePiece(_state.getSelectedSquare(), to);
+
+        bool isPromotion = _state.pieceAt(to).first == PieceType::PAWN &&
+                           (to.second == 0 || to.second == BOARD_SIZE - 1);
+        if (isPromotion)
+        {
+            _state.pieceAt(to) = Piece { PieceType::QUEEN, _state.pieceAt(to).second }; // Auto-promote to queen
+        }
         _state.clearSelection();
         _state.switchTurn();
     }
     _state.clearSelection();
     _state.possibleMoves().clear();
     return validMove;
+}
+
+//------------------------------------------------------------------------------
+// Chess Engine Interface (Stockfish)
+//------------------------------------------------------------------------------
+class StockfishEngine
+{
+    pid_t engineProcess;
+    int toEnginePipe[2];   // Parent writes to engine
+    int fromEnginePipe[2]; // Parent reads from engine
+public:
+    StockfishEngine() : engineProcess(-1), toEnginePipe{-1, -1}, fromEnginePipe{-1, -1} {}
+    ~StockfishEngine() { stop(); }
+
+    void setElo(int elo) {
+        sendCommand("setoption name UCI_LimitStrength value true");
+        sendCommand("setoption name UCI_Elo value " + to_string(elo));
+    }
+    bool start(const string& path);
+    void stop();
+    bool isRunning() const { return engineProcess != -1; }
+    void sendCommand(const string& cmd);
+    string readResponse();
+    string getMove(string positionFEN, int timeMs);
+};
+
+bool StockfishEngine::start(const string& path)
+{
+    if (isRunning()) return false;
+
+    if (pipe(toEnginePipe) == -1 || pipe(fromEnginePipe) == -1)
+    {
+        perror("pipe");
+        return false;
+    }
+
+    engineProcess = fork();
+    if (engineProcess == -1)
+    {
+        perror("fork");
+        return false;
+    }
+
+    if (engineProcess == 0) // Child process
+    {
+        close(toEnginePipe[1]);
+        close(fromEnginePipe[0]);
+
+        dup2(toEnginePipe[0], STDIN_FILENO);
+        dup2(fromEnginePipe[1], STDOUT_FILENO);
+        dup2(fromEnginePipe[1], STDERR_FILENO);
+
+        close(toEnginePipe[0]);
+        close(fromEnginePipe[1]);
+
+        execl(path.c_str(), path.c_str(), nullptr);
+        perror("execl");
+        exit(1);
+    }
+    else // Parent process
+    {
+        close(toEnginePipe[0]);
+        close(fromEnginePipe[1]);
+    }
+    sendCommand("uci");
+    while (true)
+    {
+        string response = readResponse();
+        if (response.find("uciok") != string::npos) break;
+    }
+    return true;
+}
+
+void StockfishEngine::stop()
+{
+    if (!isRunning()) return;
+
+    close(toEnginePipe[1]);
+    close(fromEnginePipe[0]);
+
+    int status;
+    waitpid(engineProcess, &status, 0);
+    engineProcess = -1;
+}
+
+void StockfishEngine::sendCommand(const string& cmd)
+{
+    if (!isRunning()) return;
+
+    string command = cmd + "\n";
+    write(toEnginePipe[1], command.c_str(), command.size());
+}
+
+string StockfishEngine::readResponse()
+{
+    if (!isRunning()) return "";
+
+    char buffer[1024];
+    ssize_t count = read(fromEnginePipe[0], buffer, sizeof(buffer) - 1);
+    if (count > 0)
+    {
+        buffer[count] = '\0';
+        return string(buffer);
+    }
+    return "";
+}
+
+string StockfishEngine::getMove(string positionFEN, int timeMs)
+{
+    if (!isRunning()) return "";
+
+    sendCommand("position fen " + positionFEN);
+    sendCommand("go movetime " + to_string(timeMs));
+
+    string bestMove;
+    while (true)
+    {
+        string response = readResponse();
+        if (response.find("bestmove") != string::npos)
+        {
+            size_t pos = response.find("bestmove");
+            size_t end = response.find(' ', pos);
+            if (end == string::npos) end = response.size();
+            bestMove = response.substr(pos + 9, 4);
+            break;
+        }
+    }
+    return bestMove;
 }
 
 //------------------------------------------------------------------------------
@@ -718,25 +913,60 @@ UserInput getUserInput()
 
 int main(int argc, char* argv[])
 {
+    const int UI_POLL_PERIOD_MS = 100;
+
     Game game;
     SdlRenderer sdlRenderer(game.gameState());
-    game.start();
-    int subTickDelayMs = 10;
-    int subTicksPerTickNormal = 20;
 
-    int subTickCnt = 0;
+    StockfishEngine engine;
+    engine.start(STOCKFISH_PATH);
+    engine.setElo(1320);
+
+    game.start();
+
     bool needRedraw = true;
     bool paused = false;
     bool quit = false;
+    bool needMoveRecalc = true;
+    PieceColor aiColor = PieceColor::BLACK;
+
     while (!quit)
     {
         if (needRedraw)
         {
             sdlRenderer.render();
-
             needRedraw = false;
         }
-        SDL_Delay(subTickDelayMs);
+        if (needMoveRecalc)
+        {
+            needMoveRecalc = false;
+            string fen = game.gameState().generateFen();
+            std::cout << "FEN: " << fen << std::endl;
+            string bestMove = engine.getMove(fen, 10);
+            std::cout << "Stockfish best move: " << bestMove << std::endl;
+        }
+        SDL_Delay(UI_POLL_PERIOD_MS);
+
+        if (game.gameState().currentTurn() == aiColor && !paused)
+        {
+            string fen = game.gameState().generateFen();
+            string bestMove = engine.getMove(fen, 100);
+            if (bestMove.size() >= 4)
+            {
+                int fromX = bestMove[0] - 'a';
+                int fromY = bestMove[1] - '1';
+                int toX = bestMove[2] - 'a';
+                int toY = bestMove[3] - '1';
+                if (fromX >= 0 && fromX < BOARD_SIZE && fromY >= 0 && fromY < BOARD_SIZE &&
+                    toX >= 0 && toX < BOARD_SIZE && toY >= 0 && toY < BOARD_SIZE)
+                {
+                    game.select({fromX, fromY});
+                    bool moved = game.move({toX, toY});
+                    needMoveRecalc = true;
+                    needRedraw = true;
+                }
+            }
+        }
 
         SDL_Event e;
         while (SDL_PollEvent(&e) == true)
@@ -784,6 +1014,7 @@ int main(int argc, char* argv[])
                             if (selected != GameState::INVALID_SQUARE)
                             {
                                 bool moved = game.move(sq);
+                                needMoveRecalc  = true;
                             }
                         }
                     }
@@ -803,23 +1034,17 @@ int main(int argc, char* argv[])
                     if (game.isValidMove(sq))
                     {
                         bool moved = game.move(sq);
+                        needMoveRecalc  = true;
                     }
                 }
             }
             needRedraw = true;
         }
         
-        subTickCnt++;
-        int subTicksPerTick = subTicksPerTickNormal;
-        if (subTickCnt >= subTicksPerTick && !paused)
+        bool gameOver = game.isGameOver();
+        if (gameOver)
         {
-            bool gameOver = game.doTick();
-            if (gameOver)
-            {
-                game.start();
-            }
-            subTickCnt = 0;
-            needRedraw = true;
+            game.start();
         }
     }
     return 0;
