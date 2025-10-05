@@ -11,10 +11,10 @@
 
 using namespace std;
 
-const string ASSERTS_DIR =  "sdl3_chess/assets/";
-const string STOCKFISH_PATH =  "sdl3_chess/stockfish/stockfish";
-//const string ASSERTS_DIR =  "../../../assets/";
-//const string STOCKFISH_PATH =  "../../../stockfish/stockfish";
+//const string ASSERTS_DIR =  "sdl3_chess/assets/";
+//const string STOCKFISH_PATH =  "sdl3_chess/stockfish/stockfish";
+const string ASSERTS_DIR =  "../../../assets/";
+const string STOCKFISH_PATH =  "../../../stockfish/stockfish";
 
 enum class PieceType
 {
@@ -48,6 +48,7 @@ public:
     Square getSelectedSquare() const { return _selectedSquare; }
     void clearSelection() { _selectedSquare = INVALID_SQUARE; }
     PieceColor currentTurn() const { return _turn; }
+    void setTurn(PieceColor color) { _turn = color; }
     void switchTurn() { _turn = (_turn == PieceColor::WHITE) ? PieceColor::BLACK : PieceColor::WHITE; }
     vector<Square>& possibleMoves() { return _possibleMoves; }
     const vector<Square>& possibleMoves() const { return _possibleMoves; }
@@ -153,14 +154,33 @@ class Game
 {
     GameState _state;
 public:
+    enum class GameResult
+    {
+        ONGOING, WHITE_WIN, BLACK_WIN, DRAW
+    };
     GameState& gameState() { return _state; }
+    const GameState& gameState() const { return _state; }
+    
     void start();
+    vector<Square> getPossibleMoveCandidates() const;
     vector<Square> getPossibleMoves() const;
+    vector<Square> getAllPossibleMoves() const;
     bool isValidMove(Square to) const;
     bool select(Square sq);
     void unselect() { _state.clearSelection(); _state.possibleMoves().clear(); }
     bool move(Square to);
-    bool isGameOver() const { return false; } // Placeholder
+    GameResult isGameOver() const;
+    static bool isCheck(const Game& game, PieceColor color);
+    static bool isValidState(const Game& game);
+    string gameResultToString(GameResult result) const {
+        switch (result) {
+            case GameResult::ONGOING: return "Ongoing";
+            case GameResult::WHITE_WIN: return "White wins";
+            case GameResult::BLACK_WIN: return "Black wins";
+            case GameResult::DRAW: return "Draw";
+            default: return "Unknown";
+        }
+    }
 };
 
 void Game::start()
@@ -168,7 +188,109 @@ void Game::start()
     _state.initializeBoard();
 }
 
-vector<Square> Game::getPossibleMoves() const
+vector<Square> Game::getAllPossibleMoves() const
+{
+    Game tempGame = *this;
+    vector<Square> allMoves;
+    for (int x = 0; x < BOARD_SIZE; ++x)
+    {
+        for (int y = 0; y < BOARD_SIZE; ++y)
+        {
+            Piece piece = tempGame.gameState().pieceAt({x, y});
+            if (piece.first != PieceType::NONE && piece.second == tempGame.gameState().currentTurn())
+            {
+                tempGame.select({x, y});
+                auto moves = tempGame.getPossibleMoves();
+                allMoves.insert(allMoves.end(), moves.begin(), moves.end());
+                tempGame.unselect();
+            }
+        }
+    }
+    return allMoves;
+}
+
+Game::GameResult Game::isGameOver() const 
+{ 
+    if (getAllPossibleMoves().empty())
+    {
+        if (isCheck(*this, _state.currentTurn()))
+        {
+            // Checkmate
+            return (_state.currentTurn() == PieceColor::WHITE) ? GameResult::BLACK_WIN : GameResult::WHITE_WIN;
+        }
+        else
+        {
+            // Stalemate
+            return GameResult::DRAW;
+        }
+    }
+    else
+    {
+        return GameResult::ONGOING;
+    }
+}
+
+bool Game::isCheck(const Game& game, PieceColor color)
+{
+    Square kingPos = GameState::INVALID_SQUARE;
+    for (int x = 0; x < BOARD_SIZE; ++x)
+    {
+        for (int y = 0; y < BOARD_SIZE; ++y)
+        {
+            Piece piece = game.gameState().pieceAt({x, y});
+            if (piece.first == PieceType::KING && piece.second == color)
+            {
+                kingPos = {x, y};
+                break;
+            }
+        }
+        if (kingPos != GameState::INVALID_SQUARE) break;
+    }
+    if (kingPos == GameState::INVALID_SQUARE) return false;
+
+    for (int x = 0; x < BOARD_SIZE; ++x)
+    {
+        for (int y = 0; y < BOARD_SIZE; ++y)
+        {
+            Piece piece = game.gameState().pieceAt({x, y});
+            if (piece.first != PieceType::NONE && piece.second != color)
+            {
+                Game tempGame = game;
+                tempGame.gameState().selectSquare({x, y});
+                tempGame.gameState().setTurn(piece.second);
+                auto moves = tempGame.getPossibleMoveCandidates();
+                if (ranges::find(moves, kingPos) != moves.end())
+                {
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+bool Game::isValidState(const Game& game)
+{
+    if (game.gameState().currentTurn() != PieceColor::WHITE && game.gameState().currentTurn() != PieceColor::BLACK)
+    {
+        return false;
+    }
+
+    if (isCheck(game, PieceColor::WHITE) && game.gameState().currentTurn() == PieceColor::BLACK)
+    {
+        return false;
+    }
+
+    if (isCheck(game, PieceColor::BLACK) && game.gameState().currentTurn() == PieceColor::WHITE)
+    {
+        return false;
+    }
+
+    return true;
+}
+
+vector<Square> Game::getPossibleMoveCandidates() const
 {
     vector<Square> possibleMoves;
     if (_state.getSelectedSquare() != GameState::INVALID_SQUARE)
@@ -342,7 +464,25 @@ vector<Square> Game::getPossibleMoves() const
             }
         }
     }
+
     return possibleMoves;
+}
+
+vector<Square> Game::getPossibleMoves() const
+{
+    vector<Square> filteredMoves;
+    auto possibleMoves = getPossibleMoveCandidates();
+    for (auto candidateMove : possibleMoves)
+    {
+        Game tempGame = *this;
+        bool moved = tempGame.move(candidateMove);
+        if (moved && isValidState(tempGame))
+        {
+            filteredMoves.push_back(candidateMove);
+        }
+    }
+
+    return filteredMoves;
 }
 
 bool Game::select(Square sq)
@@ -365,40 +505,34 @@ bool Game::isValidMove(Square to) const
 
 bool Game::move(Square to)
 {
-    bool validMove = _state.getSelectedSquare() != GameState::INVALID_SQUARE &&
-                     ranges::find(_state.possibleMoves(), to) != _state.possibleMoves().end();
-    if (validMove)
+    bool isCastling = to.second == _state.getSelectedSquare().second &&
+                        abs(to.first - _state.getSelectedSquare().first) == 2 &&
+                        _state.pieceAt(_state.getSelectedSquare()).first == PieceType::KING;
+    if (isCastling)
     {
-        bool isCastling = to.second == _state.getSelectedSquare().second &&
-                         abs(to.first - _state.getSelectedSquare().first) == 2 &&
-                         _state.pieceAt(_state.getSelectedSquare()).first == PieceType::KING;
-        if (isCastling)
+        // Move the rook as well
+        int y = _state.getSelectedSquare().second;
+        if (to.first == 6) // King-side castling
         {
-            // Move the rook as well
-            int y = _state.getSelectedSquare().second;
-            if (to.first == 6) // King-side castling
-            {
-                _state.movePiece({7, y}, {5, y});
-            }
-            else if (to.first == 2) // Queen-side castling
-            {
-                _state.movePiece({0, y}, {3, y});
-            }
+            _state.movePiece({7, y}, {5, y});
         }
-        _state.movePiece(_state.getSelectedSquare(), to);
+        else if (to.first == 2) // Queen-side castling
+        {
+            _state.movePiece({0, y}, {3, y});
+        }
+    }
+    _state.movePiece(_state.getSelectedSquare(), to);
 
-        bool isPromotion = _state.pieceAt(to).first == PieceType::PAWN &&
-                           (to.second == 0 || to.second == BOARD_SIZE - 1);
-        if (isPromotion)
-        {
-            _state.pieceAt(to) = Piece { PieceType::QUEEN, _state.pieceAt(to).second }; // Auto-promote to queen
-        }
-        _state.clearSelection();
-        _state.switchTurn();
+    bool isPromotion = _state.pieceAt(to).first == PieceType::PAWN &&
+                        (to.second == 0 || to.second == BOARD_SIZE - 1);
+    if (isPromotion)
+    {
+        _state.pieceAt(to) = Piece { PieceType::QUEEN, _state.pieceAt(to).second }; // Auto-promote to queen
     }
     _state.clearSelection();
+    _state.switchTurn();
     _state.possibleMoves().clear();
-    return validMove;
+    return true;
 }
 
 //------------------------------------------------------------------------------
@@ -961,7 +1095,10 @@ int main(int argc, char* argv[])
                     toX >= 0 && toX < BOARD_SIZE && toY >= 0 && toY < BOARD_SIZE)
                 {
                     game.select({fromX, fromY});
-                    bool moved = game.move({toX, toY});
+                    //if (game.isValidMove({toX, toY}))  // Stockfish knows rules better than us
+                    {
+                        game.move({toX, toY});
+                    }
                     needMoveRecalc = true;
                     needRedraw = true;
                 }
@@ -1013,7 +1150,10 @@ int main(int argc, char* argv[])
                             auto selected = game.gameState().getSelectedSquare();
                             if (selected != GameState::INVALID_SQUARE)
                             {
-                                bool moved = game.move(sq);
+                                if (game.isValidMove(sq))
+                                {
+                                    game.move(sq);
+                                }
                                 needMoveRecalc  = true;
                             }
                         }
@@ -1041,9 +1181,10 @@ int main(int argc, char* argv[])
             needRedraw = true;
         }
         
-        bool gameOver = game.isGameOver();
+        bool gameOver = (game.isGameOver() != Game::GameResult::ONGOING);
         if (gameOver)
         {
+            printf("Game over. %s\n", game.gameResultToString(game.isGameOver()).c_str());
             game.start();
         }
     }
