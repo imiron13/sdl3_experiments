@@ -11,10 +11,9 @@
 
 using namespace std;
 
-//const string ASSERTS_DIR =  "sdl3_chess/assets/";
-//const string STOCKFISH_PATH =  "sdl3_chess/stockfish/stockfish";
-const string ASSERTS_DIR =  "../../../assets/";
-const string STOCKFISH_PATH =  "../../../stockfish/stockfish";
+const string PROJECT_ROOT = "../../../";
+const string ASSERTS_DIR =  PROJECT_ROOT + "assets/";
+const string STOCKFISH_PATH = PROJECT_ROOT +  "stockfish/stockfish";
 
 enum class PieceType
 {
@@ -599,7 +598,23 @@ bool StockfishEngine::start(const string& path)
     {
         close(toEnginePipe[0]);
         close(fromEnginePipe[1]);
+        // check if engine is ready
+        if (engineProcess == -1)
+        {
+            perror("fork");
+            return false;
+        }
+
+        int status;
+        SDL_Delay(100); // Give engine some time to start
+        if (waitpid(engineProcess, &status, WNOHANG) == engineProcess) {
+            // Child exited immediately, likely failed to exec
+            perror("Stockfish process failed to start");
+            engineProcess = -1;
+            return false;
+        }
     }
+
     sendCommand("uci");
     while (true)
     {
@@ -1056,16 +1071,28 @@ int main(int argc, char* argv[])
     SdlRenderer sdlRenderer(game.gameState());
 
     StockfishEngine engine;
-    engine.start(STOCKFISH_PATH);
-    engine.setElo(1320);
+    bool engineStarted = engine.start(STOCKFISH_PATH);
+    if (engineStarted)
+    {
+        std::cout << "Stockfish engine started successfully." << std::endl;
+    }
+    else
+    {
+        std::cerr << "Failed to start Stockfish engine." << std::endl;
+    }
+
+    PieceColor aiColor = PieceColor::NONE;
+    if (engineStarted)
+    {
+        engine.setElo(1320);
+        aiColor = PieceColor::BLACK;
+    }
 
     game.start();
 
     bool needRedraw = true;
     bool paused = false;
     bool quit = false;
-    bool needMoveRecalc = true;
-    PieceColor aiColor = PieceColor::BLACK;
 
     while (!quit)
     {
@@ -1073,14 +1100,6 @@ int main(int argc, char* argv[])
         {
             sdlRenderer.render();
             needRedraw = false;
-        }
-        if (needMoveRecalc)
-        {
-            needMoveRecalc = false;
-            string fen = game.gameState().generateFen();
-            std::cout << "FEN: " << fen << std::endl;
-            string bestMove = engine.getMove(fen, 10);
-            std::cout << "Stockfish best move: " << bestMove << std::endl;
         }
         SDL_Delay(UI_POLL_PERIOD_MS);
 
@@ -1102,7 +1121,6 @@ int main(int argc, char* argv[])
                     {
                         game.move({toX, toY});
                     }
-                    needMoveRecalc = true;
                     needRedraw = true;
                 }
             }
@@ -1136,7 +1154,6 @@ int main(int argc, char* argv[])
                 else if(e.key.key == SDLK_R)
                 {
                     game.start();
-                    needMoveRecalc = true;
                     needRedraw = true;
                 }
             }
@@ -1163,7 +1180,6 @@ int main(int argc, char* argv[])
                                 {
                                     game.move(sq);
                                 }
-                                needMoveRecalc  = true;
                             }
                         }
                     }
@@ -1183,7 +1199,6 @@ int main(int argc, char* argv[])
                     if (game.isValidMove(sq))
                     {
                         bool moved = game.move(sq);
-                        needMoveRecalc  = true;
                     }
                 }
             }
