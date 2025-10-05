@@ -186,6 +186,9 @@ public:
 void Game::start()
 {
     _state.initializeBoard();
+    _state.clearSelection();
+    _state.possibleMoves().clear();
+    _state.setTurn(PieceColor::WHITE);
 }
 
 vector<Square> Game::getAllPossibleMoves() const
@@ -1130,6 +1133,12 @@ int main(int argc, char* argv[])
                 {
                     paused = !paused;
                 }
+                else if(e.key.key == SDLK_R)
+                {
+                    game.start();
+                    needMoveRecalc = true;
+                    needRedraw = true;
+                }
             }
             else if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
             {
@@ -1185,7 +1194,7 @@ int main(int argc, char* argv[])
         if (gameOver)
         {
             printf("Game over. %s\n", game.gameResultToString(game.isGameOver()).c_str());
-            game.start();
+            printf("Press R to restart or ESC to quit.\n");
         }
     }
     return 0;
