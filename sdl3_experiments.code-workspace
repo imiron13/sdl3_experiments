@@ -8,7 +8,10 @@
 		},
 		{
 			"path": "sdl3_tetris"
-		}
+		},
+		{
+			"path": "nes_vgm_player"
+		}		
 	],
 	"settings": {
 		"files.associations": {
@@ -25,7 +28,45 @@
 			"tuple": "cpp",
 			"type_traits": "cpp",
 			"variant": "cpp",
-			"ostream": "cpp"
+			"ostream": "cpp",
+			"cctype": "cpp",
+			"cmath": "cpp",
+			"cstddef": "cpp",
+			"cstdio": "cpp",
+			"cstdlib": "cpp",
+			"cwchar": "cpp",
+			"atomic": "cpp",
+			"bit": "cpp",
+			"concepts": "cpp",
+			"cstdint": "cpp",
+			"string": "cpp",
+			"vector": "cpp",
+			"exception": "cpp",
+			"algorithm": "cpp",
+			"iterator": "cpp",
+			"memory": "cpp",
+			"memory_resource": "cpp",
+			"numeric": "cpp",
+			"optional": "cpp",
+			"random": "cpp",
+			"string_view": "cpp",
+			"format": "cpp",
+			"initializer_list": "cpp",
+			"iosfwd": "cpp",
+			"istream": "cpp",
+			"limits": "cpp",
+			"new": "cpp",
+			"span": "cpp",
+			"streambuf": "cpp",
+			"typeinfo": "cpp",
+			"clocale": "cpp",
+			"ctime": "cpp",
+			"cwctype": "cpp",
+			"deque": "cpp",
+			"unordered_map": "cpp",
+			"numbers": "cpp",
+			"system_error": "cpp",
+			"text_encoding": "cpp"
 		}
 	}
 }
