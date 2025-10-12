@@ -23,16 +23,22 @@
 #include <limits.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <fcntl.h>d
+#include <fcntl.h>
 #endif
 #include <SDL3/SDL_main.h>
 
 using namespace std;
 
+#ifdef _WIN32
 const string PROJECT_ROOT = "..\\..\\..\\..\\";
-//const string PROJECT_ROOT = "";
 const string ASSERTS_DIR =  PROJECT_ROOT + "assets\\";
 const string STOCKFISH_PATH = PROJECT_ROOT +  "stockfish\\stockfish.exe";
+#else
+const string PROJECT_ROOT = "../../../";
+const string ASSERTS_DIR =  PROJECT_ROOT + "assets/";
+const string STOCKFISH_PATH = PROJECT_ROOT +  "stockfish/stockfish";
+#endif
+//const string PROJECT_ROOT = "";
 
 enum class PieceType
 {
@@ -757,7 +763,12 @@ std::string StockfishEngine::getMove(std::string positionFEN, int timeMs)
     sendCommand("position fen " + positionFEN);
     sendCommand("go movetime " + std::to_string(timeMs));
     std::string bestMove;
+#ifdef _WIN32
     Sleep(timeMs + 100);
+#else
+    usleep((timeMs + 100) * 1000);
+#endif
+
     for (int i = 0; i < 100; ++i) {
         std::string response = readResponse();
         auto pos = response.find("bestmove");
