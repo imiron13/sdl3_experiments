@@ -4,16 +4,35 @@
 #include <iostream>
 #include <random>
 #include <algorithm>
+#include <string>
+#include <fstream>
 #include <SDL3/SDL.h>
-#include <SDL3/SDL_main.h>
 #include <SDL3_image/SDL_image.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#include <direct.h> // _getcwd
+#define popen _popen
+#define pclose _pclose
+#ifndef PATH_MAX
+#define PATH_MAX MAX_PATH
+#define getcwd _getcwd
+#endif
+#else
+#include <unistd.h>
+#include <limits.h>
+#include <sys/types.h>
 #include <sys/wait.h>
+#include <fcntl.h>d
+#endif
+#include <SDL3/SDL_main.h>
 
 using namespace std;
 
-const string PROJECT_ROOT = "../../../";
-const string ASSERTS_DIR =  PROJECT_ROOT + "assets/";
-const string STOCKFISH_PATH = PROJECT_ROOT +  "stockfish/stockfish";
+const string PROJECT_ROOT = "..\\..\\..\\..\\";
+//const string PROJECT_ROOT = "";
+const string ASSERTS_DIR =  PROJECT_ROOT + "assets\\";
+const string STOCKFISH_PATH = PROJECT_ROOT +  "stockfish\\stockfish.exe";
 
 enum class PieceType
 {
@@ -97,8 +116,26 @@ string GameState::generateFen()
     fen += ' ';
     fen += (_turn == PieceColor::WHITE) ? 'w' : 'b';
 
-    // Castling rights (not tracked, so always "-")
-    fen += " -";
+    // Castling rights - check if kings and rooks are in their initial squares
+    string castling;
+    // White king-side
+    if (pieceAt({4,0}).first == PieceType::KING && pieceAt({4,0}).second == PieceColor::WHITE &&
+        pieceAt({7,0}).first == PieceType::ROOK && pieceAt({7,0}).second == PieceColor::WHITE)
+        castling += 'K';
+    // White queen-side
+    if (pieceAt({4,0}).first == PieceType::KING && pieceAt({4,0}).second == PieceColor::WHITE &&
+        pieceAt({0,0}).first == PieceType::ROOK && pieceAt({0,0}).second == PieceColor::WHITE)
+        castling += 'Q';
+    // Black king-side
+    if (pieceAt({4,7}).first == PieceType::KING && pieceAt({4,7}).second == PieceColor::BLACK &&
+        pieceAt({7,7}).first == PieceType::ROOK && pieceAt({7,7}).second == PieceColor::BLACK)
+        castling += 'k';
+    // Black queen-side
+    if (pieceAt({4,7}).first == PieceType::KING && pieceAt({4,7}).second == PieceColor::BLACK &&
+        pieceAt({0,7}).first == PieceType::ROOK && pieceAt({0,7}).second == PieceColor::BLACK)
+        castling += 'q';
+    if (castling.empty()) castling = "-";
+    fen += " " + castling;
 
     // En passant (not tracked, so always "-")
     fen += " -";
@@ -542,143 +579,208 @@ bool Game::move(Square to)
 //------------------------------------------------------------------------------
 class StockfishEngine
 {
-    pid_t engineProcess;
-    int toEnginePipe[2];   // Parent writes to engine
-    int fromEnginePipe[2]; // Parent reads from engine
 public:
-    StockfishEngine() : engineProcess(-1), toEnginePipe{-1, -1}, fromEnginePipe{-1, -1} {}
+    StockfishEngine() : running(false) {}
     ~StockfishEngine() { stop(); }
 
-    void setElo(int elo) {
-        sendCommand("setoption name UCI_LimitStrength value true");
-        sendCommand("setoption name UCI_Elo value " + to_string(elo));
-    }
-    bool start(const string& path);
+    bool start(const std::string& path);
     void stop();
-    bool isRunning() const { return engineProcess != -1; }
-    void sendCommand(const string& cmd);
-    string readResponse();
-    string getMove(string positionFEN, int timeMs);
+    void sendCommand(const std::string& cmd);
+    std::string readResponse();
+    std::string getMove(std::string positionFEN, int timeMs);
+    void setElo(int elo);
+
+    bool isRunning() const { return running; }
+
+private:
+#ifdef _WIN32
+    HANDLE hProcess = NULL;
+    HANDLE hChildStdinWr = NULL;
+    HANDLE hChildStdoutRd = NULL;
+#else
+    pid_t pid = -1;
+    int to_engine = -1;
+    int from_engine = -1;
+#endif
+    bool running = false;
 };
 
-bool StockfishEngine::start(const string& path)
+bool StockfishEngine::start(const std::string& path)
 {
-    if (isRunning()) return false;
+    stop();
+#ifdef _WIN32
+    SECURITY_ATTRIBUTES saAttr{ sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
+    HANDLE hChildStdinRd, hChildStdoutWr;
 
-    if (pipe(toEnginePipe) == -1 || pipe(fromEnginePipe) == -1)
-    {
-        perror("pipe");
+    // Create pipes for stdin and stdout
+    if (!CreatePipe(&hChildStdoutRd, &hChildStdoutWr, &saAttr, 0)) return false;
+    if (!SetHandleInformation(hChildStdoutRd, HANDLE_FLAG_INHERIT, 0)) return false;
+    if (!CreatePipe(&hChildStdinRd, &hChildStdinWr, &saAttr, 0)) return false;
+    if (!SetHandleInformation(hChildStdinWr, HANDLE_FLAG_INHERIT, 0)) return false;
+
+    PROCESS_INFORMATION piProcInfo{};
+    STARTUPINFOA siStartInfo{};
+    siStartInfo.cb = sizeof(STARTUPINFOA);
+    siStartInfo.hStdError = hChildStdoutWr;
+    siStartInfo.hStdOutput = hChildStdoutWr;
+    siStartInfo.hStdInput = hChildStdinRd;
+    siStartInfo.dwFlags |= STARTF_USESTDHANDLES;
+
+    std::string cmd = "\"" + path + "\"";
+    BOOL success = CreateProcessA(
+        NULL, (LPSTR)cmd.c_str(), NULL, NULL, TRUE,
+        CREATE_NO_WINDOW, NULL, NULL, &siStartInfo, &piProcInfo);
+
+    CloseHandle(hChildStdoutWr);
+    CloseHandle(hChildStdinRd);
+
+    if (!success) {
+        CloseHandle(hChildStdoutRd);
+        CloseHandle(hChildStdinWr);
         return false;
     }
 
-    engineProcess = fork();
-    if (engineProcess == -1)
-    {
-        perror("fork");
+    hProcess = piProcInfo.hProcess;
+    CloseHandle(piProcInfo.hThread);
+
+    running = true;
+#else
+    int in_pipe[2], out_pipe[2];
+    if (pipe(in_pipe) != 0 || pipe(out_pipe) != 0) return false;
+
+    pid = fork();
+    if (pid == 0) {
+        // Child
+        dup2(in_pipe[0], STDIN_FILENO);
+        dup2(out_pipe[1], STDOUT_FILENO);
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        execl(path.c_str(), path.c_str(), (char*)NULL);
+        _exit(1);
+    } else if (pid > 0) {
+        // Parent
+        close(in_pipe[0]);
+        close(out_pipe[1]);
+        to_engine = in_pipe[1];
+        from_engine = out_pipe[0];
+        fcntl(from_engine, F_SETFL, O_NONBLOCK); // Non-blocking read
+        running = true;
+    } else {
         return false;
     }
-
-    if (engineProcess == 0) // Child process
-    {
-        close(toEnginePipe[1]);
-        close(fromEnginePipe[0]);
-
-        dup2(toEnginePipe[0], STDIN_FILENO);
-        dup2(fromEnginePipe[1], STDOUT_FILENO);
-        dup2(fromEnginePipe[1], STDERR_FILENO);
-
-        close(toEnginePipe[0]);
-        close(fromEnginePipe[1]);
-
-        execl(path.c_str(), path.c_str(), nullptr);
-        perror("execl");
-        exit(1);
-    }
-    else // Parent process
-    {
-        close(toEnginePipe[0]);
-        close(fromEnginePipe[1]);
-        // check if engine is ready
-        if (engineProcess == -1)
-        {
-            perror("fork");
-            return false;
-        }
-
-        int status;
-        SDL_Delay(100); // Give engine some time to start
-        if (waitpid(engineProcess, &status, WNOHANG) == engineProcess) {
-            // Child exited immediately, likely failed to exec
-            perror("Stockfish process failed to start");
-            engineProcess = -1;
-            return false;
-        }
-    }
+#endif
 
     sendCommand("uci");
-    while (true)
-    {
-        string response = readResponse();
-        if (response.find("uciok") != string::npos) break;
+    std::string response;
+    for (int i = 0; i < 10; ++i) {
+        response = readResponse();
+        if (response.find("uciok") != std::string::npos) break;
+#ifdef _WIN32
+        Sleep(10);
+#else
+        usleep(10000);
+#endif
     }
-    return true;
+    return running;
 }
 
 void StockfishEngine::stop()
 {
-    if (!isRunning()) return;
-
-    close(toEnginePipe[1]);
-    close(fromEnginePipe[0]);
-
-    int status;
-    waitpid(engineProcess, &status, 0);
-    engineProcess = -1;
-}
-
-void StockfishEngine::sendCommand(const string& cmd)
-{
-    if (!isRunning()) return;
-
-    string command = cmd + "\n";
-    write(toEnginePipe[1], command.c_str(), command.size());
-}
-
-string StockfishEngine::readResponse()
-{
-    if (!isRunning()) return "";
-
-    char buffer[1024];
-    ssize_t count = read(fromEnginePipe[0], buffer, sizeof(buffer) - 1);
-    if (count > 0)
-    {
-        buffer[count] = '\0';
-        return string(buffer);
+#ifdef _WIN32
+    if (hProcess) {
+        TerminateProcess(hProcess, 0);
+        CloseHandle(hProcess);
+        hProcess = NULL;
     }
-    return "";
+    if (hChildStdinWr) { CloseHandle(hChildStdinWr); hChildStdinWr = NULL; }
+    if (hChildStdoutRd) { CloseHandle(hChildStdoutRd); hChildStdoutRd = NULL; }
+#else
+    if (pid > 0) {
+        kill(pid, SIGTERM);
+        waitpid(pid, nullptr, 0);
+        pid = -1;
+    }
+    if (to_engine != -1) { close(to_engine); to_engine = -1; }
+    if (from_engine != -1) { close(from_engine); from_engine = -1; }
+#endif
+    running = false;
 }
 
-string StockfishEngine::getMove(string positionFEN, int timeMs)
+void StockfishEngine::sendCommand(const std::string& cmd)
 {
-    if (!isRunning()) return "";
+    if (!running) return;
+    std::string command = cmd + "\n";
+#ifdef _WIN32
+    DWORD written;
+    WriteFile(hChildStdinWr, command.c_str(), (DWORD)command.size(), &written, NULL);
+#else
+    write(to_engine, command.c_str(), command.size());
+#endif
+}
 
-    sendCommand("position fen " + positionFEN);
-    sendCommand("go movetime " + to_string(timeMs));
-
-    string bestMove;
-    while (true)
-    {
-        string response = readResponse();
-        if (response.find("bestmove") != string::npos)
-        {
-            size_t pos = response.find("bestmove");
-            size_t end = response.find(' ', pos);
-            if (end == string::npos) end = response.size();
-            bestMove = response.substr(pos + 9, 4);
+std::string StockfishEngine::readResponse()
+{
+    if (!running) return "";
+    std::string result;
+    char buffer[1024];
+#ifdef _WIN32
+    DWORD read = 0;
+    while (true) {
+        if (!ReadFile(hChildStdoutRd, buffer, sizeof(buffer) - 1, &read, NULL) || read == 0)
             break;
+        buffer[read] = 0;
+        result += buffer;
+        if (result.find("bestmove") != std::string::npos || result.find("uciok") != std::string::npos)
+            break;
+        Sleep(10);
+    }
+#else
+    ssize_t n;
+    for (int i = 0; i < 100; ++i) {
+        n = read(from_engine, buffer, sizeof(buffer) - 1);
+        if (n > 0) {
+            buffer[n] = 0;
+            result += buffer;
+            if (result.find("bestmove") != std::string::npos || result.find("uciok") != std::string::npos)
+                break;
+        } else {
+            usleep(10000);
         }
     }
+#endif
+    return result;
+}
+
+std::string StockfishEngine::getMove(std::string positionFEN, int timeMs)
+{
+    if (!running) return "";
+    sendCommand("position fen " + positionFEN);
+    sendCommand("go movetime " + std::to_string(timeMs));
+    std::string bestMove;
+    Sleep(timeMs + 100);
+    for (int i = 0; i < 100; ++i) {
+        std::string response = readResponse();
+        auto pos = response.find("bestmove");
+        if (pos != std::string::npos) {
+            size_t moveStart = pos + 9;
+            while (moveStart < response.size() && response[moveStart] == ' ') ++moveStart;
+            size_t moveEnd = moveStart;
+            while (moveEnd < response.size() && response[moveEnd] != ' ' && response[moveEnd] != '\n') ++moveEnd;
+            bestMove = response.substr(moveStart, moveEnd - moveStart);
+            break;
+        }
+#ifdef _WIN32
+        Sleep(10);
+#else
+        usleep(10000);
+#endif
+    }
     return bestMove;
+}
+
+void StockfishEngine::setElo(int elo) {
+    sendCommand("setoption name UCI_LimitStrength value true");
+    sendCommand("setoption name UCI_Elo value " + std::to_string(elo));
 }
 
 //------------------------------------------------------------------------------
@@ -1052,8 +1154,8 @@ UserInput getUserInput()
         }
         else if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
         {
-            int x = e.button.x;
-            int y = e.button.y;
+            int x = (int)e.button.x;
+            int y = (int)e.button.y;
             int boardX = (x - 8) / 16;
             int boardY = 7 - (y - 8) / 16;
             std::cout << "Mouse click at (" << x << ", " << y << "), board square (" << boardX << ", " << boardY << ")\n";
@@ -1063,9 +1165,33 @@ UserInput getUserInput()
     return UserInput::NONE;
 }
 
+int LoadStockfishEloFromINI(const std::string& filename, int defaultElo) {
+    std::ifstream inifile(filename);
+    if (!inifile) return defaultElo;
+    std::string line;
+    while (std::getline(inifile, line)) {
+        size_t eq = line.find('=');
+        if (eq != std::string::npos) {
+            std::string key = line.substr(0, eq);
+            std::string value = line.substr(eq + 1);
+            if (key == "elo") {
+                try {
+                    return std::stoi(value);
+                } catch (...) {
+                    return defaultElo;
+                }
+            }
+        }
+    }
+    return defaultElo;
+}
+
 int main(int argc, char* argv[])
 {
     const int UI_POLL_PERIOD_MS = 100;
+    const std::string settingsPath = "settings.ini";
+    const int defaultElo = 1320;
+    int elo = LoadStockfishEloFromINI(settingsPath, defaultElo);
 
     Game game;
     SdlRenderer sdlRenderer(game.gameState());
@@ -1080,11 +1206,11 @@ int main(int argc, char* argv[])
     {
         std::cerr << "Failed to start Stockfish engine." << std::endl;
     }
-
+    
     PieceColor aiColor = PieceColor::NONE;
     if (engineStarted)
     {
-        engine.setElo(1320);
+        engine.setElo(elo);
         aiColor = PieceColor::BLACK;
     }
 
@@ -1159,8 +1285,8 @@ int main(int argc, char* argv[])
             }
             else if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
             {
-                int x = e.button.x;
-                int y = e.button.y;
+                int x = (int)e.button.x;
+                int y = (int)e.button.y;
                 if (e.button.button == SDL_BUTTON_LEFT)
                 {
                     auto sq = sdlRenderer.getSquareAtScreenPos(x, y);
@@ -1191,8 +1317,8 @@ int main(int argc, char* argv[])
             }
             else if (e.type == SDL_EVENT_MOUSE_BUTTON_UP && e.button.button == SDL_BUTTON_LEFT)
             {
-                int x = e.button.x;
-                int y = e.button.y;
+                int x = (int)e.button.x;
+                int y = (int)e.button.y;
                 auto sq = sdlRenderer.getSquareAtScreenPos(x, y);
                 if (sq != GameState::INVALID_SQUARE && game.gameState().getSelectedSquare() != GameState::INVALID_SQUARE)
                 {
@@ -1208,8 +1334,8 @@ int main(int argc, char* argv[])
         bool gameOver = (game.isGameOver() != Game::GameResult::ONGOING);
         if (gameOver)
         {
-            printf("Game over. %s\n", game.gameResultToString(game.isGameOver()).c_str());
-            printf("Press R to restart or ESC to quit.\n");
+            //printf("Game over. %s\n", game.gameResultToString(game.isGameOver()).c_str());
+            //printf("Press R to restart or ESC to quit.\n");
         }
     }
     return 0;
