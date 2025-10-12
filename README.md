@@ -24,3 +24,15 @@ cd sdl3_chess
 cmake -S . -B out
 cmake --build out
 ```
+
+## NES VGM Player
+This is a console application. It uses NES APU model from https://github.com/Shim06/Anemoia-ESP32 (output redirected to SDL audio subsystem). It opens VGM (Video Game Music) file format which contains commands like APU register writes, delays and sends these commands to the APU model for music synthesis. It makes a list from all the .vgm files in the current folder and plays them one after another. Keyboard control: n - next track, p - previous track, ESC - quit.
+
+
+
+### Build
+```
+cd nes_vgm_player
+cmake -S . -B out
+cmake --build out
+```
