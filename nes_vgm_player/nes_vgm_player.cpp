@@ -16,6 +16,9 @@
 using namespace std;
 
 #ifdef _WIN32
+#define NOMINMAX   // Optional: Avoid min/max macro clashes
+#define byte _windows_byte_defined // Prevent 'byte' from being defined in Windows headers
+#include <windows.h>
     #include <conio.h>
     #include <windows.h>
 #else
@@ -85,7 +88,7 @@ void putAudioStreamData(const void* buf, int len)
 // ---------------------------------------------------------------------
 class VgmPlayer {
 public:
-    enum class Status { IDLE, FINISHED, PLAYING, QUIT, ERROR, NEXT, PREV };
+    enum class Status { IDLE, FINISHED, PLAYING, QUIT, ST_ERROR, NEXT, PREV };
     VgmPlayer() = default;
     bool load(const std::string& path);
     Status play(Apu2A03& apu);
@@ -134,7 +137,7 @@ bool VgmPlayer::load(const std::string& path) {
 VgmPlayer::Status VgmPlayer::play(Apu2A03& apu) {
     if (data.empty()) {
         std::cerr << "No VGM data loaded\n";
-        return Status::ERROR;
+        return Status::ST_ERROR;
     }
 
     size_t pos = dataOffset;
@@ -151,7 +154,7 @@ VgmPlayer::Status VgmPlayer::play(Apu2A03& apu) {
                 return Status::FINISHED;
 
             case 0xB4: { // NES APU write
-                if (pos + 2 > end) return Status::ERROR;
+                if (pos + 2 > end) return Status::ST_ERROR;
                 uint8_t addr = data[pos++];
                 uint8_t val = data[pos++];
                 apu.cpuWrite(0x4000 + addr, val);
@@ -159,7 +162,7 @@ VgmPlayer::Status VgmPlayer::play(Apu2A03& apu) {
             }
 
             case 0x61: { // wait n samples
-                if (pos + 2 > end) return Status::ERROR;
+                if (pos + 2 > end) return Status::ST_ERROR;
                 uint16_t n = data[pos] | (data[pos + 1] << 8);
                 pos += 2;
                 uint32_t cycles = static_cast<uint32_t>(n * samplesPerCpuCycle);
@@ -178,13 +181,13 @@ VgmPlayer::Status VgmPlayer::play(Apu2A03& apu) {
             }
 
             case 0x67: // Data block
-                if (pos + 3 > end) return Status::ERROR;
+                if (pos + 3 > end) return Status::ST_ERROR;
                 {
                     uint8_t extra_cmd = data[pos++];
                     uint8_t type = data[pos++];
                     uint32_t size = data[pos] | (data[pos + 1] << 8) | (data[pos + 2] << 16) | (data[pos + 3] << 24);
                     pos += 4;
-                    if (pos + size > end) return Status::ERROR;
+                    if (pos + size > end) return Status::ST_ERROR;
                     // Skip data block for now
                     pos += size;
                 }
@@ -199,13 +202,14 @@ VgmPlayer::Status VgmPlayer::play(Apu2A03& apu) {
                     // Unhandled command, skip or stop
                     std::cerr << "Unknown VGM command: 0x" 
                             << std::hex << (int)cmd << std::dec << "\n";
-                    return Status::ERROR;
+                    return Status::ST_ERROR;
                 }
                 break;
             }
         }
 
 #ifdef _WIN32
+        int ch = -1;
         if (_kbhit()) ch = _getch();
 #else
         int ch = getchar();
@@ -258,12 +262,13 @@ int main(int argc, char* argv[])
     apuInit();
 
     VgmPlayer vgm;
-    string media_folder = "../../../";
+    string media_folder = "../../../../";
+
     vector<string> files;
     // find .vgm files in the current directory
     #ifdef _WIN32
         WIN32_FIND_DATA findFileData;
-        HANDLE hFind = FindFirstFile("*.vgm", &findFileData);
+        HANDLE hFind = FindFirstFile((media_folder + "*.vgm").c_str(), &findFileData);
         if (hFind != INVALID_HANDLE_VALUE) {
             do {
                 if (!(findFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
@@ -300,7 +305,7 @@ int main(int argc, char* argv[])
         if (status == VgmPlayer::Status::QUIT) {
             break;
         }
-        else if (status == VgmPlayer::Status::ERROR) {
+        else if (status == VgmPlayer::Status::ST_ERROR) {
             std::cerr << "Error during playback of file: " << file << "\n";
         }
         else if (status == VgmPlayer::Status::NEXT) {

@@ -31,14 +31,8 @@ set(SOURCES
     apu2A03.h
 )
 
-if(WIN32)
-    add_executable(nes_vgm_player WIN32
-        ${SOURCES}
-    )
-else()
-    add_executable(nes_vgm_player
-        ${SOURCES}
-    )
-endif()
+add_executable(nes_vgm_player
+    ${SOURCES}
+)
 
 target_link_libraries(nes_vgm_player PRIVATE SDL3::SDL3)

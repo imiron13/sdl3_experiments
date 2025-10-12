@@ -38,6 +38,18 @@
                 "CMAKE_CXX_COMPILER": "/usr/bin/clang++-19",
                 "CMAKE_BUILD_TYPE": "Debug"
             }
+        },
+        {
+            "name": "Clang-x64",
+            "description": "",
+            "displayName": "",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "d:/soft/clang-18/bin/clang.exe",
+                "CMAKE_CXX_COMPILER": "d:/soft/clang-18/bin/clang++.exe"
+            },
+            "inherits": [
+                "CLang-x86_64-linux"
+            ]
         }
     ],
     "buildPresets": [
@@ -46,6 +58,15 @@
             "displayName": "Visual Studio Community 2022 Release - amd64 - Debug",
             "configurePreset": "msvc-x64",
             "configuration": "Debug"
+        },
+        {
+            "name": "VS 2022 Release",
+            "description": "",
+            "displayName": "",
+            "configuration": "Release",
+            "inherits": [
+                "msvc-x64-debug"
+            ]
         }
     ]
 }
